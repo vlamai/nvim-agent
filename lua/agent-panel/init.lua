@@ -3,8 +3,7 @@ local M = {}
 
 M.did_setup = false
 
----Setup the agent panel plugin
----@param opts? AgentPanel.UserOptions plugin options
+---@param opts? AgentPanel.UserOptions
 function M.setup(opts)
   if M.did_setup then
     local Util = require("agent-panel.util")
@@ -14,23 +13,29 @@ function M.setup(opts)
   require("agent-panel.config").setup(opts)
 end
 
----Open the agent panel floating window
----@return integer buf, integer win
 function M.open()
-  local Window = require("agent-panel.window")
-  return Window.open()
+  require("agent-panel.layout").open()
 end
 
----Close the agent panel
 function M.close()
-  local Window = require("agent-panel.window")
-  Window.close()
+  require("agent-panel.layout").close()
 end
 
----Toggle the agent panel
 function M.toggle()
-  local Window = require("agent-panel.window")
-  Window.toggle()
+  require("agent-panel.layout").toggle()
+end
+
+---@return boolean
+function M.is_open()
+  return require("agent-panel.layout").is_open()
+end
+
+---@param name "sidebar"|"main"|"input"
+function M.focus(name)
+  local layout = require("agent-panel.layout")
+  if layout.panes and layout.panes[name] then
+    layout.panes[name]:focus()
+  end
 end
 
 return M
