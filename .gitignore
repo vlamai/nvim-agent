@@ -1,0 +1,5 @@
+.tests/
+.repro/
+.nvim-init.md
+*.rockspec
+.pi/tasks/

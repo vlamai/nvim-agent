@@ -1,0 +1,53 @@
+{
+  "nextId": 5,
+  "tasks": [
+    {
+      "id": "1",
+      "subject": "Создать структуру плагина nvim-agent-panel",
+      "description": "Скопировать структуру из base.nvim, переименовать модули, создать init.lua, config.lua, util.lua, plugin/agent-panel.lua, tests/",
+      "status": "completed",
+      "activeForm": "Создаю структуру плагина",
+      "metadata": {},
+      "blocks": [],
+      "blockedBy": [],
+      "createdAt": 1783955296234,
+      "updatedAt": 1783955314477
+    },
+    {
+      "id": "2",
+      "subject": "Реализовать модуль floating window",
+      "description": "Создать lua/agent-panel/window.lua с функциями создания/закрытия floating windows через nvim_open_win, управление размерами, позиционирование",
+      "status": "completed",
+      "activeForm": "Пишу модуль floating window",
+      "metadata": {},
+      "blocks": [],
+      "blockedBy": [],
+      "createdAt": 1783955296235,
+      "updatedAt": 1783955337602
+    },
+    {
+      "id": "3",
+      "subject": "Написать тесты для floating window",
+      "description": "Создать tests/window_spec.lua с тестами: создание окна, закрытие, проверка буфера, настройки окна",
+      "status": "in_progress",
+      "activeForm": "Пишу тесты",
+      "metadata": {},
+      "blocks": [],
+      "blockedBy": [],
+      "createdAt": 1783955296236,
+      "updatedAt": 1783955365768
+    },
+    {
+      "id": "4",
+      "subject": "Добавить интеграцию с lazy.nvim и инструкции",
+      "description": "Создать пример конфигурации для lazy.nvim в README, чтобы пользователь мог установить плагин",
+      "status": "pending",
+      "activeForm": "Пишу инструкции",
+      "metadata": {},
+      "blocks": [],
+      "blockedBy": [],
+      "createdAt": 1783955296238,
+      "updatedAt": 1783955296238
+    }
+  ]
+}
