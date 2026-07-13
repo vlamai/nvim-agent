@@ -344,6 +344,144 @@ describe("layout", function()
     end)
   end)
 
+  describe("navigation keybindings", function()
+    it("Ctrl+l from input wraps to sidebar", function()
+      Layout.open()
+      Layout.focus("input")
+      assert.are.equal("input", Layout.active_pane)
+      -- Trigger Ctrl+l keybinding
+      vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<C-l>", true, false, true), "x", false)
+      assert.are.equal("sidebar", Layout.active_pane)
+    end)
+
+    it("Ctrl+h from sidebar wraps to input", function()
+      Layout.open()
+      Layout.focus("sidebar")
+      assert.are.equal("sidebar", Layout.active_pane)
+      -- Trigger Ctrl+h keybinding
+      vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<C-h>", true, false, true), "x", false)
+      assert.are.equal("input", Layout.active_pane)
+    end)
+  end)
+
+  describe("sidebar selection notification", function()
+    it("<CR> on item triggers vim.notify", function()
+      Layout.open()
+      Layout.focus("sidebar")
+      -- Move to first item (line 3)
+      vim.api.nvim_win_set_cursor(Layout.panes.sidebar.win, { 3, 0 })
+      -- Stub vim.notify to capture calls
+      local notify_called = false
+      local notify_msg = nil
+      local original_notify = vim.notify
+      vim.notify = function(msg, ...)
+        notify_called = true
+        notify_msg = msg
+        -- Don't call original to avoid noise
+      end
+      -- Trigger Enter keybinding using schedule to ensure it runs
+      vim.schedule(function()
+        vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<CR>", true, false, true), "x", false)
+      end)
+      vim.wait(100)
+      -- Restore vim.notify
+      vim.notify = original_notify
+      -- Assert notification was sent
+      assert.is_true(notify_called)
+      assert.is_truthy(notify_msg:match("Selected"))
+    end)
+  end)
+
+  describe("input submit content", function()
+    it("submitted text appears in main buffer", function()
+      Layout.open()
+      local input_pane = Layout.panes.input
+      local main_pane = Layout.panes.main
+      -- Set text in input
+      vim.bo[input_pane.buf].modifiable = true
+      vim.api.nvim_buf_set_lines(input_pane.buf, 0, -1, false, { "Hello from test" })
+      vim.bo[input_pane.buf].modifiable = false
+      -- Submit
+      Layout._submit_input(input_pane, main_pane)
+      -- Check main buffer contains the text
+      local main_lines = vim.api.nvim_buf_get_lines(main_pane.buf, 0, -1, false)
+      local found = false
+      for _, line in ipairs(main_lines) do
+        if line:match("Hello from test") then
+          found = true
+          break
+        end
+      end
+      assert.is_true(found)
+    end)
+
+    it("submitted text is in You box format", function()
+      Layout.open()
+      local input_pane = Layout.panes.input
+      local main_pane = Layout.panes.main
+      -- Set text in input
+      vim.bo[input_pane.buf].modifiable = true
+      vim.api.nvim_buf_set_lines(input_pane.buf, 0, -1, false, { "Formatted message" })
+      vim.bo[input_pane.buf].modifiable = false
+      -- Submit
+      Layout._submit_input(input_pane, main_pane)
+      -- Check main buffer has the box format
+      local main_lines = vim.api.nvim_buf_get_lines(main_pane.buf, 0, -1, false)
+      local found_header = false
+      local found_content = false
+      for _, line in ipairs(main_lines) do
+        if line:match("┌─ You") then
+          found_header = true
+        end
+        if line:match("Formatted message") then
+          found_content = true
+        end
+      end
+      assert.is_true(found_header)
+      assert.is_true(found_content)
+    end)
+  end)
+
+  describe("scroll behavior", function()
+    it("scroll_to_bottom moves cursor to last line", function()
+      Layout.open()
+      Layout.focus("main")
+      local pane = Layout.panes.main
+      -- Set multiple lines
+      local test_lines = {}
+      for i = 1, 20 do
+        table.insert(test_lines, "line " .. i)
+      end
+      pane:set_lines(test_lines)
+      -- Start at line 1
+      vim.api.nvim_win_set_cursor(pane.win, { 1, 0 })
+      -- Scroll to bottom
+      Layout._scroll_to_bottom(pane)
+      -- Cursor should be at last line
+      local cursor = vim.api.nvim_win_get_cursor(pane.win)
+      assert.are.equal(20, cursor[1])
+    end)
+
+    it("scroll percentage updates after scroll", function()
+      Layout.open()
+      Layout.focus("main")
+      local pane = Layout.panes.main
+      -- Set multiple lines
+      local test_lines = {}
+      for i = 1, 10 do
+        table.insert(test_lines, "line " .. i)
+      end
+      pane:set_lines(test_lines)
+      -- Scroll to bottom
+      vim.api.nvim_win_set_cursor(pane.win, { 10, 0 })
+      Layout.update_scroll_pct(pane)
+      -- Check extmark exists
+      local Config = require("agent-panel.config")
+      local marks = vim.api.nvim_buf_get_extmarks(pane.buf, Config.ns, 0, -1, {})
+      assert.is_true(#marks > 0)
+    end)
+  end)
+
   describe("input pane", function()
     it("input pane is created on open", function()
       Layout.open()
