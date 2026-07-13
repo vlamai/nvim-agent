@@ -311,10 +311,10 @@ function M._load_session_messages(session_path)
     return
   end
   -- Switch session first, then load messages
-  M.client:switch_session(session_path, function(success)
+  M.client:switch_session(session_path, function(success, err)
     if not success then
       vim.schedule(function()
-        vim.notify("  ❌ Failed to switch session", vim.log.levels.ERROR)
+        vim.notify("  ❌ Failed to switch session" .. (err and (": " .. err) or ""), vim.log.levels.ERROR)
       end)
       return
     end

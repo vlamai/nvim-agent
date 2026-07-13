@@ -42,6 +42,7 @@ function Client:_spawn()
     stdio = { self._stdin, self._stdout, nil },
   }, function(code, _signal)
     vim.schedule(function()
+      self._state = "disposed"
       self:_cleanup()
       if self._on_exit then
         self._on_exit(code)
@@ -237,13 +238,36 @@ end
 
 ---Switch to a different session.
 ---@param sessionPath string  path to the session file
----@param callback fun(success: boolean)
+---@param callback fun(success: boolean, err?: string)
 function Client:switch_session(sessionPath, callback)
+  local settled = false
   self:_send_with_response({ type = "switch_session", sessionPath = sessionPath }, function(resp)
+    if settled then return end
+    settled = true
     if callback then
-      callback(resp.success == true)
+      if not resp.success then
+        local err_msg = resp.error or "switch failed"
+        vim.notify("  ⚠ switch_session error: " .. err_msg, vim.log.levels.WARN)
+        callback(false, err_msg)
+      elseif resp.data and resp.data.cancelled then
+        callback(false, "switch cancelled by extension")
+      else
+        callback(true)
+      end
     end
   end)
+  -- Timeout: if no response in 10s, treat as failure
+  vim.defer_fn(function()
+    if not settled then
+      settled = true
+      self._pending["switch_session"] = nil
+      if callback then
+        vim.schedule(function()
+          callback(false, "timeout waiting for pi response")
+        end)
+      end
+    end
+  end, 10000)
 end
 
 ---Kill the process and clean up.
