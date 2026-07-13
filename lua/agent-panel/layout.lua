@@ -95,23 +95,7 @@ local function build_sidebar_lines()
   return lines
 end
 
--- Initial sidebar items
-local default_sidebar_items = {
-  "▸ Current Chat",
-  "  Earlier Today",
-  "  Yesterday",
-  "  Project Setup",
-  "  Code Review",
-  "",
-  "  Model: gpt-4",
-  "  Temp: 0.7",
-}
 
--- Dummy data for sidebar (built from items)
-local function get_dummy_sidebar()
-  M.sidebar_items = vim.deepcopy(default_sidebar_items)
-  return build_sidebar_lines()
-end
 
 ---Delete a sidebar item by its display line number
 ---@param display_line integer 1-indexed line in the buffer
@@ -167,43 +151,7 @@ function M._add_sidebar_item(text)
   end
 end
 
--- Dummy data for main
-local dummy_main = {
-  "## Agent",
-  "",
-  "Hello! I'm your AI assistant.",
-  "How can I help you today?",
-  "",
-  "---",
-  "",
-  "## You",
-  "",
-  "Show me how to create a",
-  "floating window in Neovim.",
-  "",
-  "---",
-  "",
-  "## Agent",
-  "",
-  "Here's a basic example using",
-  "nvim_open_win():",
-  "",
-  "```lua",
-  "local buf = vim.api.nvim_create_buf(false, true)",
-  "local win = vim.api.nvim_open_win(buf, true, {",
-  "  relative = 'editor',",
-  "  width = 40,",
-  "  height = 10,",
-  "  row = 5,",
-  "  col = 10,",
-  "  style = 'minimal',",
-  "  border = 'rounded',",
-  "})",
-  "```",
-  "",
-  "This creates a centered floating",
-  "window with rounded borders.",
-}
+
 
 ---Apply border highlights to all panes based on active pane
 function M._apply_highlights()
@@ -794,7 +742,7 @@ local function create(layout)
       end,
     },
     on_open = function(pane)
-      pane:set_lines(get_dummy_sidebar())
+      pane:set_lines({})
     end,
   })
 
@@ -890,7 +838,7 @@ local function create(layout)
       end,
     },
     on_open = function(pane)
-      pane:set_lines(dummy_main, true)
+      pane:set_lines({}, true)
       -- Set up CursorMoved autocmd for scroll indicator
       vim.api.nvim_create_autocmd("CursorMoved", {
         callback = function()

@@ -224,6 +224,8 @@ describe("layout", function()
     it("update_scroll_pct sets extmark", function()
       Layout.open()
       Layout.focus("main")
+      -- Need multiple lines for extmark to be set
+      Layout.panes.main:set_lines({ "line1", "line2", "line3" })
       Layout.update_scroll_pct(Layout.panes.main)
       local Config = require("agent-panel.config")
       local marks = vim.api.nvim_buf_get_extmarks(Layout.panes.main.buf, Config.ns, 0, -1, {})
@@ -242,10 +244,11 @@ describe("layout", function()
   end)
 
   describe("sidebar list", function()
-    it("initializes sidebar_items on open", function()
+    it("sidebar_items starts empty on open", function()
       Layout.open()
-      assert.is_not_nil(Layout.sidebar_items)
-      assert.is_true(#Layout.sidebar_items > 0)
+      -- sidebar_items is nil or empty when panel opens clean
+      local count = Layout.sidebar_items and #Layout.sidebar_items or 0
+      assert.are.equal(0, count)
     end)
 
     it("sidebar opens with cursor at line 1", function()
@@ -258,7 +261,8 @@ describe("layout", function()
     it("_add_sidebar_item adds to list", function()
       Layout.open()
       Layout.focus("sidebar")
-      local initial_count = #Layout.sidebar_items
+      -- sidebar_items starts nil/empty
+      local initial_count = Layout.sidebar_items and #Layout.sidebar_items or 0
       Layout._add_sidebar_item("New Item")
       assert.are.equal(initial_count + 1, #Layout.sidebar_items)
       assert.are.equal("New Item", Layout.sidebar_items[#Layout.sidebar_items])
@@ -267,35 +271,34 @@ describe("layout", function()
     it("_delete_sidebar_item removes from list", function()
       Layout.open()
       Layout.focus("sidebar")
+      -- Add some items first
+      Layout._add_sidebar_item("Item 1")
+      Layout._add_sidebar_item("Item 2")
       local initial_count = #Layout.sidebar_items
       -- Delete the first item (line 3 in buffer)
       Layout._delete_sidebar_item(3)
       assert.are.equal(initial_count - 1, #Layout.sidebar_items)
     end)
 
-    it("sidebar_items has correct count", function()
-      Layout.open()
-      -- default_sidebar_items has 8 entries
-      assert.are.equal(8, #Layout.sidebar_items)
-    end)
+
 
     it("_delete_sidebar_item does not delete skip lines", function()
       Layout.open()
       Layout.focus("sidebar")
+      -- Add an item so sidebar_items is not nil
+      Layout._add_sidebar_item("Item 1")
       local initial_count = #Layout.sidebar_items
       -- Try to delete line 1 (header)
       Layout._delete_sidebar_item(1)
       assert.are.equal(initial_count, #Layout.sidebar_items)
     end)
 
-    it("sidebar buffer has header and separator", function()
+    it("sidebar buffer is empty on open", function()
       Layout.open()
       local lines = vim.api.nvim_buf_get_lines(Layout.panes.sidebar.buf, 0, -1, false)
-      assert.is_true(#lines > 0)
-      -- First line should be header
-      assert.is_truthy(lines[1]:match("📋"))
-      -- Second line should be separator
-      assert.is_truthy(lines[2]:match("─"))
+      -- Buffer has 1 empty line (nvim default for empty buffer)
+      assert.are.equal(1, #lines)
+      assert.are.equal("", lines[1])
     end)
   end)
 
@@ -368,7 +371,9 @@ describe("layout", function()
     it("<CR> on item triggers vim.notify", function()
       Layout.open()
       Layout.focus("sidebar")
-      -- Move to first item (line 3)
+      -- Add an item first so there's something to select
+      Layout._add_sidebar_item("Test Item")
+      -- Move to first item (line 3 after header/separator)
       vim.api.nvim_win_set_cursor(Layout.panes.sidebar.win, { 3, 0 })
       -- Stub vim.notify to capture calls
       local notify_called = false
