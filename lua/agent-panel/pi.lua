@@ -211,6 +211,41 @@ function Client:get_state(callback)
   end)
 end
 
+---Get list of all sessions.
+---@param callback fun(entries: table[])  list of { path, title, ... }
+function Client:get_entries(callback)
+  self:_send_with_response({ type = "get_entries" }, function(resp)
+    if resp.success and resp.data then
+      callback(resp.data.entries or resp.data or {})
+    else
+      callback({})
+    end
+  end)
+end
+
+---Create a new session.
+---@param callback fun(session: table|nil)  new session info or nil on error
+function Client:new_session(callback)
+  self:_send_with_response({ type = "new_session" }, function(resp)
+    if resp.success and resp.data then
+      callback(resp.data)
+    else
+      callback(nil)
+    end
+  end)
+end
+
+---Switch to a different session.
+---@param sessionPath string  path to the session file
+---@param callback fun(success: boolean)
+function Client:switch_session(sessionPath, callback)
+  self:_send_with_response({ type = "switch_session", sessionPath = sessionPath }, function(resp)
+    if callback then
+      callback(resp.success == true)
+    end
+  end)
+end
+
 ---Kill the process and clean up.
 function Client:dispose()
   if self._state == "disposed" then return end

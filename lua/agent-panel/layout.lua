@@ -1,8 +1,15 @@
+---@class AgentPanel.Session
+---@field path string  session file path
+---@field title string  display title
+---@field is_active boolean  whether this is the current session
+
 ---@class AgentPanel.Layout
 ---@field panes table<string, AgentPanel.Pane>|nil
 ---@field augroup integer|nil
 ---@field active_pane string|nil
----@field sidebar_items string[] list of selectable sidebar items
+---@field sessions AgentPanel.Session[] list of session entries
+---@field active_session_path string|nil path of the currently active session
+---@field sidebar_items string[] legacy: kept for backward compat
 local M = {}
 
 local pane_order = { "sidebar", "main", "input" }
@@ -78,20 +85,23 @@ local function find_next_item(lines, start, direction)
   return nil
 end
 
--- Build sidebar display lines from items
+-- Build sidebar display lines from sessions
 ---@return string[]
 local function build_sidebar_lines()
-  if not M.sidebar_items then
-    return {}
-  end
   local lines = {}
-  -- Add header
-  table.insert(lines, "  📋 Conversations")
+  -- Header
+  table.insert(lines, "  📋 Sessions")
   table.insert(lines, "  ─────────────")
-  -- Add items
-  for _, item in ipairs(M.sidebar_items) do
-    table.insert(lines, "  " .. item)
+  -- Session entries
+  if M.sessions then
+    for _, session in ipairs(M.sessions) do
+      local prefix = session.is_active and "▸ " or "  "
+      table.insert(lines, prefix .. session.title)
+    end
   end
+  -- Separator + New Chat entry
+  table.insert(lines, "  ─────────────")
+  table.insert(lines, "  + New Chat")
   return lines
 end
 
@@ -108,37 +118,43 @@ function M._delete_sidebar_item(display_line)
   if not line or is_skip_line(line) then
     return
   end
-  -- Find the item index in sidebar_items by counting non-skip lines before this one
-  local item_idx = 0
+  local trimmed = vim.trim(line)
+  -- Don't delete the "+ New Chat" entry
+  if trimmed == "+ New Chat" then
+    return
+  end
+  -- Find session index by counting non-skip lines (excluding "+ New Chat") before this one
+  local session_idx = 0
   for i = 1, display_line do
-    if not is_skip_line(lines[i]) then
-      item_idx = item_idx + 1
+    local l = lines[i]
+    if l and not is_skip_line(l) and vim.trim(l) ~= "+ New Chat" then
+      session_idx = session_idx + 1
     end
   end
-  -- Remove from items list
-  if M.sidebar_items and item_idx > 0 and item_idx <= #M.sidebar_items then
-    table.remove(M.sidebar_items, item_idx)
+  -- Remove from sessions list
+  if M.sessions and session_idx > 0 and session_idx <= #M.sessions then
+    table.remove(M.sessions, session_idx)
     -- Re-render the sidebar
     local new_lines = build_sidebar_lines()
     M.panes.sidebar:set_lines(new_lines)
     -- Move cursor to a valid item if needed
-    local next = find_next_item(new_lines, display_line, 1)
-    if not next then
-      next = find_next_item(new_lines, display_line, -1)
+    local next_line = find_next_item(new_lines, display_line, 1)
+    if not next_line then
+      next_line = find_next_item(new_lines, display_line, -1)
     end
-    if next and M.panes.sidebar:is_valid() then
-      vim.api.nvim_win_set_cursor(M.panes.sidebar.win, { next, 0 })
+    if next_line and M.panes.sidebar:is_valid() then
+      vim.api.nvim_win_set_cursor(M.panes.sidebar.win, { next_line, 0 })
     end
   end
 end
 
----Add a new sidebar item at the end
+---Add a new sidebar item at the end (legacy compat)
 ---@param text string
 function M._add_sidebar_item(text)
-  if not M.sidebar_items then
-    M.sidebar_items = {}
+  if not M.sessions then
+    M.sessions = {}
   end
-  table.insert(M.sidebar_items, text)
+  table.insert(M.sessions, { path = "", title = text, is_active = false })
   -- Re-render the sidebar
   if M.panes and M.panes.sidebar and M.panes.sidebar:is_valid() then
     local new_lines = build_sidebar_lines()
@@ -149,6 +165,128 @@ function M._add_sidebar_item(text)
       vim.api.nvim_win_set_cursor(M.panes.sidebar.win, { new_line, 0 })
     end
   end
+end
+
+---Re-render the sidebar buffer from current sessions
+function M._render_sidebar()
+  if not M.panes or not M.panes.sidebar or not M.panes.sidebar:is_valid() then
+    return
+  end
+  local new_lines = build_sidebar_lines()
+  M.panes.sidebar:set_lines(new_lines)
+end
+
+---Fetch sessions from pi RPC and re-render sidebar
+function M.refresh_sessions()
+  if not M.client or not M.client:is_running() then
+    return
+  end
+  M.client:get_entries(function(entries)
+    vim.schedule(function()
+      M.sessions = {}
+      if entries then
+        for _, entry in ipairs(entries) do
+          local path = entry.path or entry.sessionPath or ""
+          local title = entry.title or entry.name or vim.fn.fnamemodify(path, ":t") or "Untitled"
+          local is_active = (path ~= "" and path == M.active_session_path)
+          table.insert(M.sessions, {
+            path = path,
+            title = title,
+            is_active = is_active,
+          })
+        end
+      end
+      -- Sort: active session first, then by title
+      table.sort(M.sessions, function(a, b)
+        if a.is_active then return true end
+        if b.is_active then return false end
+        return a.title < b.title
+      end)
+      M._render_sidebar()
+    end)
+  end)
+end
+
+---Load messages for a session into the main pane
+---@param session_path string|nil
+function M._load_session_messages(session_path)
+  if not M.client or not M.client:is_running() then
+    return
+  end
+  -- If no path given, just clear the main pane
+  if not session_path then
+    if M.panes and M.panes.main and M.panes.main:is_valid() then
+      M.panes.main:set_lines({})
+    end
+    return
+  end
+  -- Switch session first, then load messages
+  M.client:switch_session(session_path, function(success)
+    if not success then
+      vim.schedule(function()
+        vim.notify("  ❌ Failed to switch session", vim.log.levels.ERROR)
+      end)
+      return
+    end
+    vim.schedule(function()
+      M.active_session_path = session_path
+      -- Update active indicator on sessions
+      if M.sessions then
+        for _, s in ipairs(M.sessions) do
+          s.is_active = (s.path == session_path)
+        end
+        -- Sort: active first
+        table.sort(M.sessions, function(a, b)
+          if a.is_active then return true end
+          if b.is_active then return false end
+          return a.title < b.title
+        end)
+        M._render_sidebar()
+      end
+      -- Now fetch messages
+      M.client:get_messages(function(messages)
+        vim.schedule(function()
+          M._render_messages(messages)
+        end)
+      end)
+    end)
+  end)
+end
+
+---Render messages into the main pane buffer
+---@param messages table[]  array of { role, content, ... }
+function M._render_messages(messages)
+  if not M.panes or not M.panes.main or not M.panes.main:is_valid() then
+    return
+  end
+  local main_pane = M.panes.main
+  local lines = {}
+  for _, msg in ipairs(messages) do
+    local role = msg.role or "unknown"
+    local content = msg.content or ""
+    -- Format as markdown
+    if role == "user" then
+      table.insert(lines, "## You")
+      table.insert(lines, "")
+      -- Split content on newlines
+      for _, cline in ipairs(vim.split(content, "\n", { plain = true })) do
+        table.insert(lines, cline)
+      end
+      table.insert(lines, "")
+      table.insert(lines, "---")
+      table.insert(lines, "")
+    elseif role == "assistant" then
+      table.insert(lines, "## Agent")
+      table.insert(lines, "")
+      for _, cline in ipairs(vim.split(content, "\n", { plain = true })) do
+        table.insert(lines, cline)
+      end
+      table.insert(lines, "")
+      table.insert(lines, "---")
+      table.insert(lines, "")
+    end
+  end
+  main_pane:set_lines(lines, true)
 end
 
 
@@ -206,7 +344,7 @@ end
 
 ---Hints content for each pane
 local hints_text = {
-  sidebar = "  j/k: navigate  \195\137: select  dd: delete  a: add  ?: help  q: quit",
+  sidebar = "  j/k: navigate  Enter: select  dd: delete  r: refresh  ?: help  q: quit",
   main = "  j/k: scroll  G/gg: top/bottom  Ctrl+d/u: half-page  Ctrl+c: abort  ?: help  q: quit",
   input = "  \195\137: send  Ctrl+c: clear  Ctrl+h/l: switch pane  Esc: normal mode",
 }
@@ -230,10 +368,10 @@ local help_lines = {
   "    ?             This help",
   "",
   "  Sidebar",
-  "    j / k         Navigate items",
-  "    Enter          Select item",
-  "    dd            Delete item",
-  "    a             Add item",
+  "    j / k         Navigate sessions",
+  "    Enter          Select session / New chat",
+  "    dd            Delete session",
+  "    r             Refresh session list",
   "    Ctrl+l        Focus main pane",
   "",
   "  Main",
@@ -695,11 +833,53 @@ local function create(layout)
         local cur = vim.api.nvim_win_get_cursor(pane.win)[1]
         local lines = vim.api.nvim_buf_get_lines(pane.buf, 0, -1, false)
         local line = lines[cur]
-        if line and not is_skip_line(line) then
-          vim.notify("Selected: " .. vim.trim(line))
+        if not line or is_skip_line(line) then
+          return
+        end
+        local trimmed = vim.trim(line)
+        -- "+ New Chat" entry
+        if trimmed == "+ New Chat" then
+          if M.client and M.client:is_running() then
+            M.client:new_session(function(session)
+              vim.schedule(function()
+                if session then
+                  local path = session.path or session.sessionPath or ""
+                  local title = session.title or session.name or "New Chat"
+                  M.active_session_path = path
+                  -- Add to sessions list
+                  if not M.sessions then M.sessions = {} end
+                  -- Mark all as inactive, add new one
+                  for _, s in ipairs(M.sessions) do
+                    s.is_active = false
+                  end
+                  table.insert(M.sessions, 1, { path = path, title = title, is_active = true })
+                  M._render_sidebar()
+                  -- Load messages for the new session
+                  M._load_session_messages(path)
+                else
+                  vim.notify("  ❌ Failed to create new session", vim.log.levels.ERROR)
+                end
+              end)
+            end)
+          end
+          return
+        end
+        -- Session entry: find which session was selected
+        local session_idx = 0
+        for i = 1, cur do
+          local l = lines[i]
+          if l and not is_skip_line(l) and vim.trim(l) ~= "+ New Chat" then
+            session_idx = session_idx + 1
+          end
+        end
+        if M.sessions and session_idx > 0 and session_idx <= #M.sessions then
+          local session = M.sessions[session_idx]
+          if not session.is_active then
+            M._load_session_messages(session.path)
+          end
         end
       end,
-      -- Delete item with confirmation
+      -- Delete session with confirmation
       ["dd"] = function(pane)
         local cur = vim.api.nvim_win_get_cursor(pane.win)[1]
         local lines = vim.api.nvim_buf_get_lines(pane.buf, 0, -1, false)
@@ -707,22 +887,46 @@ local function create(layout)
         if not line or is_skip_line(line) then
           return
         end
-        local item_text = vim.trim(line)
+        local trimmed = vim.trim(line)
+        if trimmed == "+ New Chat" then
+          return
+        end
+        -- Find session index
+        local session_idx = 0
+        for i = 1, cur do
+          local l = lines[i]
+          if l and not is_skip_line(l) and vim.trim(l) ~= "+ New Chat" then
+            session_idx = session_idx + 1
+          end
+        end
+        if not M.sessions or session_idx <= 0 or session_idx > #M.sessions then
+          return
+        end
+        local session = M.sessions[session_idx]
         vim.ui.select({ "yes", "no" }, {
-          prompt = "Delete '" .. item_text .. "'?",
+          prompt = "Delete '" .. session.title .. "'?",
         }, function(choice)
           if choice == "yes" then
-            M._delete_sidebar_item(cur)
+            -- Delete the session file
+            if session.path and session.path ~= "" then
+              pcall(os.remove, session.path)
+            end
+            -- Remove from list and refresh
+            table.remove(M.sessions, session_idx)
+            if M.active_session_path == session.path then
+              M.active_session_path = nil
+            end
+            M._render_sidebar()
+            -- Clear main pane if deleted session was active
+            if M.panes and M.panes.main and M.panes.main:is_valid() then
+              M.panes.main:set_lines({})
+            end
           end
         end)
       end,
-      -- Add new item
-      ["a"] = function(pane)
-        vim.ui.input({ prompt = "New item: " }, function(input)
-          if input and input ~= "" then
-            M._add_sidebar_item(input)
-          end
-        end)
+      -- Refresh session list
+      ["r"] = function()
+        M.refresh_sessions()
       end,
       -- Pane navigation
       ["<C-h>"] = function()
@@ -742,7 +946,7 @@ local function create(layout)
       end,
     },
     on_open = function(pane)
-      pane:set_lines({})
+      pane:set_lines(build_sidebar_lines())
     end,
   })
 
@@ -951,12 +1155,18 @@ function M.open()
   if not M.augroup then
     M.augroup = vim.api.nvim_create_augroup("agent-panel-layout", { clear = true })
   end
+  M.sessions = {}
+  M.active_session_path = nil
   create(M)
   M.update()
   M.focus("sidebar")
-  -- Spawn pi client
+  -- Spawn pi client and load sessions
   local PiClient = require("agent-panel.pi")
   M.client = PiClient.new({})
+  -- Fetch sessions after a short delay to let pi initialize
+  vim.defer_fn(function()
+    M.refresh_sessions()
+  end, 500)
 end
 
 function M.update()
