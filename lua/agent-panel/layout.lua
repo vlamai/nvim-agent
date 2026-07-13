@@ -1110,7 +1110,7 @@ local function create(layout)
       vim.api.nvim_buf_set_lines(pane.buf, 0, -1, false, { "" })
       Placeholder.set(pane.buf)
       -- Set up autocmds for placeholder and auto-grow
-      vim.api.nvim_create_autocmd({ "InsertEnter", "InsertLeave", "TextChanged" }, {
+      vim.api.nvim_create_autocmd({ "InsertEnter", "InsertLeave", "TextChangedI" }, {
         buffer = pane.buf,
         group = layout.augroup,
         callback = function(ev)
@@ -1126,8 +1126,8 @@ local function create(layout)
             if not Placeholder.has_content(pane.buf) then
               Placeholder.set(pane.buf)
             end
-          elseif event == "TextChanged" then
-            -- Update placeholder based on content
+          elseif event == "TextChangedI" then
+            -- Update placeholder based on content during insert mode
             if not Placeholder.has_content(pane.buf) then
               Placeholder.set(pane.buf)
             else
