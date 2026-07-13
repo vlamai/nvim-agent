@@ -1,15 +1,17 @@
 ---@module 'luassert'
 
 local agent_panel = require("agent-panel")
+local Layout = require("agent-panel.layout")
 
 describe("agent-panel", function()
   before_each(function()
     agent_panel.did_setup = false
     agent_panel.setup({})
+    Layout.close()
   end)
 
   after_each(function()
-    agent_panel.close()
+    Layout.close()
   end)
 
   describe("setup()", function()
@@ -24,29 +26,12 @@ describe("agent-panel", function()
     end)
   end)
 
-  describe("open()", function()
-    it("returns buffer and window handles", function()
-      local buf, win = agent_panel.open()
-      assert.is_not_nil(buf)
-      assert.is_not_nil(win)
-    end)
-  end)
-
-  describe("close()", function()
-    it("handles close when not open", function()
-      assert.has_no.errors(function()
-        agent_panel.close()
-      end)
-    end)
-  end)
-
   describe("toggle()", function()
     it("toggles the panel", function()
       agent_panel.toggle()
-      local Window = require("agent-panel.window")
-      assert.is_true(Window.is_open())
+      assert.is_true(Layout.is_open())
       agent_panel.toggle()
-      assert.is_false(Window.is_open())
+      assert.is_false(Layout.is_open())
     end)
   end)
 end)

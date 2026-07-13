@@ -1,17 +1,4 @@
 {
   "nextId": 6,
-  "tasks": [
-    {
-      "id": "5",
-      "subject": "Переработать layout: список слева, текст по центру, ввод снизу",
-      "description": "Создать мульти-оконный layout внутри floating window: левая панель со списком, центральное окно с текстом, строка ввода снизу. Использовать dummy данные. Переписать window.lua полностью.",
-      "status": "in_progress",
-      "activeForm": "Проектирую layout",
-      "metadata": {},
-      "blocks": [],
-      "blockedBy": [],
-      "createdAt": 1783955610476,
-      "updatedAt": 1783955754823
-    }
-  ]
+  "tasks": []
 }
