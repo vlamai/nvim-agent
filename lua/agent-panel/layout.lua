@@ -2,6 +2,7 @@
 ---@field panes table<string, AgentPanel.Pane>|nil
 ---@field augroup integer|nil
 ---@field active_pane string|nil
+---@field sidebar_items string[] list of selectable sidebar items
 local M = {}
 
 local pane_order = { "sidebar", "main", "input" }
@@ -35,21 +36,129 @@ function M.calc_positions(cfg)
   }
 end
 
--- Dummy data for sidebar
-local dummy_sidebar = {
-  "  📋 Conversations",
-  "  ─────────────",
-  "  ▸ Current Chat",
-  "    Earlier Today",
-  "    Yesterday",
-  "    Project Setup",
-  "    Code Review",
+-- Check if a line is a non-item line (header, separator, or empty)
+---@param line string
+---@return boolean
+local function is_skip_line(line)
+  -- Empty or whitespace-only
+  if line:match("^%s*$") then
+    return true
+  end
+  -- Separator lines (only horizontal rules)
+  if line:match("^%s*[─]+$") then
+    return true
+  end
+  -- Header lines (starts with emoji)
+  if line:match("^%s*[📋⚙]") then
+    return true
+  end
+  return false
+end
+
+-- Find the next non-skip line from a given position
+---@param lines string[]
+---@param start integer 1-indexed start position
+---@param direction integer 1 for down, -1 for up
+---@return integer|nil
+local function find_next_item(lines, start, direction)
+  local i = start
+  while i >= 1 and i <= #lines do
+    if not is_skip_line(lines[i]) then
+      return i
+    end
+    i = i + direction
+  end
+  return nil
+end
+
+-- Build sidebar display lines from items
+---@return string[]
+local function build_sidebar_lines()
+  if not M.sidebar_items then
+    return {}
+  end
+  local lines = {}
+  -- Add header
+  table.insert(lines, "  📋 Conversations")
+  table.insert(lines, "  ─────────────")
+  -- Add items
+  for _, item in ipairs(M.sidebar_items) do
+    table.insert(lines, "  " .. item)
+  end
+  return lines
+end
+
+-- Initial sidebar items
+local default_sidebar_items = {
+  "▸ Current Chat",
+  "  Earlier Today",
+  "  Yesterday",
+  "  Project Setup",
+  "  Code Review",
   "",
-  "  ⚙ Settings",
-  "  ─────────────",
-  "    Model: gpt-4",
-  "    Temp: 0.7",
+  "  Model: gpt-4",
+  "  Temp: 0.7",
 }
+
+-- Dummy data for sidebar (built from items)
+local function get_dummy_sidebar()
+  M.sidebar_items = vim.deepcopy(default_sidebar_items)
+  return build_sidebar_lines()
+end
+
+---Delete a sidebar item by its display line number
+---@param display_line integer 1-indexed line in the buffer
+function M._delete_sidebar_item(display_line)
+  if not M.panes or not M.panes.sidebar or not M.panes.sidebar:is_valid() then
+    return
+  end
+  local lines = vim.api.nvim_buf_get_lines(M.panes.sidebar.buf, 0, -1, false)
+  local line = lines[display_line]
+  if not line or is_skip_line(line) then
+    return
+  end
+  -- Find the item index in sidebar_items by counting non-skip lines before this one
+  local item_idx = 0
+  for i = 1, display_line do
+    if not is_skip_line(lines[i]) then
+      item_idx = item_idx + 1
+    end
+  end
+  -- Remove from items list
+  if M.sidebar_items and item_idx > 0 and item_idx <= #M.sidebar_items then
+    table.remove(M.sidebar_items, item_idx)
+    -- Re-render the sidebar
+    local new_lines = build_sidebar_lines()
+    M.panes.sidebar:set_lines(new_lines)
+    -- Move cursor to a valid item if needed
+    local next = find_next_item(new_lines, display_line, 1)
+    if not next then
+      next = find_next_item(new_lines, display_line, -1)
+    end
+    if next and M.panes.sidebar:is_valid() then
+      vim.api.nvim_win_set_cursor(M.panes.sidebar.win, { next, 0 })
+    end
+  end
+end
+
+---Add a new sidebar item at the end
+---@param text string
+function M._add_sidebar_item(text)
+  if not M.sidebar_items then
+    M.sidebar_items = {}
+  end
+  table.insert(M.sidebar_items, text)
+  -- Re-render the sidebar
+  if M.panes and M.panes.sidebar and M.panes.sidebar:is_valid() then
+    local new_lines = build_sidebar_lines()
+    M.panes.sidebar:set_lines(new_lines)
+    -- Move cursor to the new item
+    local new_line = #new_lines
+    if new_line > 0 then
+      vim.api.nvim_win_set_cursor(M.panes.sidebar.win, { new_line, 0 })
+    end
+  end
+end
 
 -- Dummy data for main
 local dummy_main = {
@@ -121,7 +230,7 @@ function M.update_scroll_pct(pane)
   local pct = math.floor((cursor_line / line_count) * 100)
   local text = string.format("── %d%% ──", pct)
   -- Clear previous extmark
-  local marks = vim.api.nvim_buf_get_extmarks(pane.buf, Config.ns, 0, -1)
+  local marks = vim.api.nvim_buf_get_extmarks(pane.buf, Config.ns, 0, -1, {})
   for _, mark in ipairs(marks) do
     vim.api.nvim_buf_del_extmark(pane.buf, Config.ns, mark[1])
   end
@@ -233,21 +342,57 @@ local function create(layout)
       ["<Esc>"] = function()
         M.close()
       end,
+      -- Navigate down, skipping non-item lines
       ["j"] = function(pane)
+        local lines = vim.api.nvim_buf_get_lines(pane.buf, 0, -1, false)
         local cur = vim.api.nvim_win_get_cursor(pane.win)[1]
-        local line_count = vim.api.nvim_buf_line_count(pane.buf)
-        if cur < line_count then
-          vim.api.nvim_win_set_cursor(pane.win, { cur + 1, 0 })
+        local next = find_next_item(lines, cur + 1, 1)
+        if next then
+          vim.api.nvim_win_set_cursor(pane.win, { next, 0 })
         end
       end,
+      -- Navigate up, skipping non-item lines
       ["k"] = function(pane)
+        local lines = vim.api.nvim_buf_get_lines(pane.buf, 0, -1, false)
         local cur = vim.api.nvim_win_get_cursor(pane.win)[1]
-        if cur > 1 then
-          vim.api.nvim_win_set_cursor(pane.win, { cur - 1, 0 })
+        local prev = find_next_item(lines, cur - 1, -1)
+        if prev then
+          vim.api.nvim_win_set_cursor(pane.win, { prev, 0 })
         end
       end,
-      ["<CR>"] = function()
-        -- placeholder: select sidebar item
+      -- Select item with Enter
+      ["<CR>"] = function(pane)
+        local cur = vim.api.nvim_win_get_cursor(pane.win)[1]
+        local lines = vim.api.nvim_buf_get_lines(pane.buf, 0, -1, false)
+        local line = lines[cur]
+        if line and not is_skip_line(line) then
+          vim.notify("Selected: " .. vim.trim(line))
+        end
+      end,
+      -- Delete item with confirmation
+      ["dd"] = function(pane)
+        local cur = vim.api.nvim_win_get_cursor(pane.win)[1]
+        local lines = vim.api.nvim_buf_get_lines(pane.buf, 0, -1, false)
+        local line = lines[cur]
+        if not line or is_skip_line(line) then
+          return
+        end
+        local item_text = vim.trim(line)
+        vim.ui.select({ "yes", "no" }, {
+          prompt = "Delete '" .. item_text .. "'?",
+        }, function(choice)
+          if choice == "yes" then
+            M._delete_sidebar_item(cur)
+          end
+        end)
+      end,
+      -- Add new item
+      ["a"] = function(pane)
+        vim.ui.input({ prompt = "New item: " }, function(input)
+          if input and input ~= "" then
+            M._add_sidebar_item(input)
+          end
+        end)
       end,
       -- Pane navigation
       ["<C-h>"] = function()
@@ -264,7 +409,7 @@ local function create(layout)
       end,
     },
     on_open = function(pane)
-      pane:set_lines(dummy_sidebar)
+      pane:set_lines(get_dummy_sidebar())
     end,
   })
 

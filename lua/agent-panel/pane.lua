@@ -11,6 +11,7 @@ Pane.__index = Pane
 ---@field wo table<string, any>
 ---@field bo table<string, any>
 ---@field keymaps table<string, fun(pane: AgentPanel.Pane)>
+---@field insert_keymaps table<string, fun(pane: AgentPanel.Pane)>|nil
 ---@field on_open fun(pane: AgentPanel.Pane)|nil
 
 ---@param name string
@@ -62,6 +63,12 @@ function Pane:_set_keymaps()
     vim.keymap.set("n", lhs, function()
       rhs(self)
     end, vim.tbl_extend("force", base, { desc = "agent-panel:" .. self.name }))
+  end
+  -- Insert-mode keymaps
+  for lhs, rhs in pairs(self.opts.insert_keymaps or {}) do
+    vim.keymap.set("i", lhs, function()
+      rhs(self)
+    end, vim.tbl_extend("force", base, { desc = "agent-panel:" .. self.name .. ":i" }))
   end
 end
 
