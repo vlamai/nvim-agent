@@ -486,11 +486,20 @@ function M._append_delta(main_pane, delta, is_first)
     end
     main_lines = cleaned
   end
-  -- Get last line and append delta
-  if #main_lines > 0 then
-    main_lines[#main_lines] = main_lines[#main_lines] .. delta
-  else
-    table.insert(main_lines, delta)
+  -- Split delta on newlines before appending
+  if delta ~= "" then
+    local delta_lines = vim.split(delta, "\n", { plain = true })
+    for i, dline in ipairs(delta_lines) do
+      if i == 1 then
+        if #main_lines > 0 then
+          main_lines[#main_lines] = main_lines[#main_lines] .. dline
+        else
+          table.insert(main_lines, dline)
+        end
+      else
+        table.insert(main_lines, dline)
+      end
+    end
   end
   vim.api.nvim_buf_set_lines(main_pane.buf, 0, -1, false, main_lines)
   vim.bo[main_pane.buf].modifiable = false
