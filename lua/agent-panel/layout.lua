@@ -29,7 +29,10 @@ function M.calc_positions(cfg)
   local mh = ph - cfg.input_height
   local ih = cfg.input_height
 
+  -- Hints bar is 1 row above the panel
+  local hints_height = 1
   return {
+    hints = { relative = "editor", row = pr - hints_height, col = pc, width = pw, height = hints_height },
     sidebar = { relative = "editor", row = pr, col = pc, width = sw, height = ph },
     main = { relative = "editor", row = pr, col = pc + sw, width = mw, height = mh },
     input = { relative = "editor", row = pr + mh, col = pc + sw, width = mw, height = ih },
@@ -251,6 +254,94 @@ function M._scroll_to_bottom(pane)
   end
 end
 
+---Hints content for each pane
+local hints_text = {
+  sidebar = "  j/k: navigate  \195\137: select  dd: delete  a: add  ?: help  q: quit",
+  main = "  j/k: scroll  G/gg: top/bottom  Ctrl+d/u: half-page  ?: help  q: quit",
+  input = "  \195\137: send  Ctrl+c: clear  Ctrl+h/l: switch pane  Esc: normal mode",
+}
+
+---Update hints bar content based on active pane
+function M._update_hints()
+  if not M.panes or not M.panes.hints or not M.panes.hints:is_valid() then
+    return
+  end
+  local text = hints_text[M.active_pane] or ""
+  M.panes.hints:set_lines({ text })
+end
+
+---Help popup content
+local help_lines = {
+  "",
+  "  \226\148\128 Agent Panel Help \226\148\128",
+  "",
+  "  Global",
+  "    q / Esc       Close panel",
+  "    ?             This help",
+  "",
+  "  Sidebar",
+  "    j / k         Navigate items",
+  "    Enter          Select item",
+  "    dd            Delete item",
+  "    a             Add item",
+  "    Ctrl+l        Focus main pane",
+  "",
+  "  Main",
+  "    j / k         Scroll",
+  "    G / gg        Bottom / Top",
+  "    Ctrl+d/u      Half page",
+  "    Ctrl+h        Focus sidebar",
+  "",
+  "  Input",
+  "    Enter          Send message",
+  "    Ctrl+c        Clear input",
+  "    Ctrl+h/l      Switch pane",
+  "",
+}
+
+---Show help popup
+function M._show_help()
+  if M._help_win and vim.api.nvim_win_is_valid(M._help_win) then
+    return
+  end
+  local buf = vim.api.nvim_create_buf(false, true)
+  vim.bo[buf].buftype = "nofile"
+  vim.bo[buf].bufhidden = "hide"
+  vim.bo[buf].swapfile = false
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, help_lines)
+  vim.bo[buf].modifiable = false
+  -- Calculate dimensions
+  local max_width = 0
+  for _, line in ipairs(help_lines) do
+    max_width = math.max(max_width, vim.fn.strdisplaywidth(line))
+  end
+  local width = max_width + 4
+  local height = #help_lines + 2
+  -- Center on screen
+  local row = math.floor((vim.o.lines - height) / 2)
+  local col = math.floor((vim.o.columns - width) / 2)
+  M._help_win = vim.api.nvim_open_win(buf, true, {
+    relative = "editor",
+    width = width,
+    height = height,
+    row = row,
+    col = col,
+    style = "minimal",
+    border = "rounded",
+    zindex = 100,
+  })
+  -- Close keymaps
+  local close = function()
+    if M._help_win and vim.api.nvim_win_is_valid(M._help_win) then
+      vim.api.nvim_win_close(M._help_win, true)
+      M._help_win = nil
+    end
+  end
+  vim.keymap.set("n", "q", close, { buffer = buf, silent = true })
+  vim.keymap.set("n", "<Esc>", close, { buffer = buf, silent = true })
+  vim.keymap.set("n", "?", close, { buffer = buf, silent = true })
+end
+
 ---Input pane placeholder management
 local Placeholder = {}
 local PLACEHOLDER_TEXT = "Ask me anything..."
@@ -449,6 +540,9 @@ function M.focus(name)
   -- Apply border highlights to all panes
   M._apply_highlights()
 
+  -- Update hints bar
+  M._update_hints()
+
   -- Enable cursorline on sidebar when focused
   if name == "sidebar" and M.panes.sidebar:is_valid() then
     vim.wo[M.panes.sidebar.win].cursorline = true
@@ -469,6 +563,17 @@ local function create(layout)
   local Config = require("agent-panel.config")
 
   layout.panes = {}
+
+  -- Hints bar
+  layout.panes.hints = Pane.new("hints", {
+    ft = "agent-panel-hints",
+    wo = { wrap = false, number = false, relativenumber = false, signcolumn = "no", cursorline = false },
+    bo = { modifiable = false },
+    on_open = function(pane)
+      pane:set_lines({ "" })
+      vim.wo[pane.win].winhl = "NormalFloat:Comment"
+    end,
+  })
 
   -- Sidebar
   layout.panes.sidebar = Pane.new("sidebar", {
@@ -547,6 +652,9 @@ local function create(layout)
       ["<C-k>"] = function()
         M.nav_left()
       end,
+      ["?"] = function()
+        M._show_help()
+      end,
     },
     on_open = function(pane)
       pane:set_lines(get_dummy_sidebar())
@@ -622,6 +730,9 @@ local function create(layout)
       ["<C-k>"] = function()
         M.nav_left()
       end,
+      ["?"] = function()
+        M._show_help()
+      end,
     },
     on_open = function(pane)
       pane:set_lines(dummy_main, true)
@@ -663,6 +774,10 @@ local function create(layout)
       ["<C-k>"] = function()
         vim.cmd("stopinsert")
         M.nav_left()
+      end,
+      ["?"] = function()
+        vim.cmd("stopinsert")
+        M._show_help()
       end,
     },
     insert_keymaps = {
@@ -767,6 +882,11 @@ function M.update()
 end
 
 function M.close()
+  -- Close help popup if open
+  if M._help_win and vim.api.nvim_win_is_valid(M._help_win) then
+    pcall(vim.api.nvim_win_close, M._help_win, true)
+    M._help_win = nil
+  end
   if M.panes then
     for _, pane in pairs(M.panes) do
       pane:destroy()
