@@ -94,11 +94,20 @@ function Pane:focus()
 end
 
 ---@param lines string[]
-function Pane:set_lines(lines)
+---@param scroll_bottom boolean|nil scroll to bottom after setting lines
+function Pane:set_lines(lines, scroll_bottom)
   if vim.api.nvim_buf_is_valid(self.buf) then
     vim.bo[self.buf].modifiable = true
     vim.api.nvim_buf_set_lines(self.buf, 0, -1, false, lines)
     vim.bo[self.buf].modifiable = false
+    if scroll_bottom and self:is_valid() then
+      vim.schedule(function()
+        if self:is_valid() then
+          local line_count = vim.api.nvim_buf_line_count(self.buf)
+          pcall(vim.api.nvim_win_set_cursor, self.win, { line_count, 0 })
+        end
+      end)
+    end
   end
 end
 

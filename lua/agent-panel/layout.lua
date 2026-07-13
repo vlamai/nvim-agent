@@ -106,6 +106,41 @@ function M._apply_highlights()
   end
 end
 
+---Update scroll percentage indicator on main pane
+---@param pane AgentPanel.Pane
+function M.update_scroll_pct(pane)
+  if not pane or not pane:is_valid() then
+    return
+  end
+  local Config = require("agent-panel.config")
+  local line_count = vim.api.nvim_buf_line_count(pane.buf)
+  if line_count <= 1 then
+    return
+  end
+  local cursor_line = vim.api.nvim_win_get_cursor(pane.win)[1]
+  local pct = math.floor((cursor_line / line_count) * 100)
+  local text = string.format("── %d%% ──", pct)
+  -- Clear previous extmark
+  local marks = vim.api.nvim_buf_get_extmarks(pane.buf, Config.ns, 0, -1)
+  for _, mark in ipairs(marks) do
+    vim.api.nvim_buf_del_extmark(pane.buf, Config.ns, mark[1])
+  end
+  -- Set new extmark at last line
+  vim.api.nvim_buf_set_extmark(pane.buf, Config.ns, line_count - 1, 0, {
+    virt_text = { { text, "Comment" } },
+    virt_text_pos = "overlay",
+  })
+end
+
+---Scroll pane to bottom
+---@param pane AgentPanel.Pane
+function M._scroll_to_bottom(pane)
+  if pane:is_valid() then
+    local line_count = vim.api.nvim_buf_line_count(pane.buf)
+    pcall(vim.api.nvim_win_set_cursor, pane.win, { line_count, 0 })
+  end
+end
+
 ---Navigate to the next pane to the right (wraps): sidebar→main→input→sidebar
 function M.nav_right()
   if not M.active_pane then
@@ -236,7 +271,7 @@ local function create(layout)
   -- Main
   layout.panes.main = Pane.new("main", {
     ft = "agent-panel-main",
-    wo = { wrap = true, number = false, relativenumber = false, signcolumn = "no", cursorline = false },
+    wo = { wrap = true, number = false, relativenumber = false, signcolumn = "no", cursorline = false, scrolloff = 2 },
     bo = { modifiable = false },
     keymaps = {
       ["q"] = function()
@@ -245,12 +280,49 @@ local function create(layout)
       ["<Esc>"] = function()
         M.close()
       end,
+      -- Line scroll
+      ["j"] = function(pane)
+        local cur = vim.api.nvim_win_get_cursor(pane.win)[1]
+        local line_count = vim.api.nvim_buf_line_count(pane.buf)
+        if cur < line_count then
+          vim.api.nvim_win_set_cursor(pane.win, { cur + 1, 0 })
+        end
+        M.update_scroll_pct(pane)
+      end,
+      ["k"] = function(pane)
+        local cur = vim.api.nvim_win_get_cursor(pane.win)[1]
+        if cur > 1 then
+          vim.api.nvim_win_set_cursor(pane.win, { cur - 1, 0 })
+        end
+        M.update_scroll_pct(pane)
+      end,
+      -- Half-page scroll
+      ["<C-d>"] = function(pane)
+        local cur = vim.api.nvim_win_get_cursor(pane.win)[1]
+        local line_count = vim.api.nvim_buf_line_count(pane.buf)
+        local height = vim.api.nvim_win_get_height(pane.win)
+        local half = math.floor(height / 2)
+        local target = math.min(cur + half, line_count)
+        vim.api.nvim_win_set_cursor(pane.win, { target, 0 })
+        M.update_scroll_pct(pane)
+      end,
+      ["<C-u>"] = function(pane)
+        local cur = vim.api.nvim_win_get_cursor(pane.win)[1]
+        local height = vim.api.nvim_win_get_height(pane.win)
+        local half = math.floor(height / 2)
+        local target = math.max(cur - half, 1)
+        vim.api.nvim_win_set_cursor(pane.win, { target, 0 })
+        M.update_scroll_pct(pane)
+      end,
+      -- Go to top/bottom
       ["G"] = function(pane)
         local line_count = vim.api.nvim_buf_line_count(pane.buf)
         vim.api.nvim_win_set_cursor(pane.win, { line_count, 0 })
+        M.update_scroll_pct(pane)
       end,
       ["gg"] = function(pane)
         vim.api.nvim_win_set_cursor(pane.win, { 1, 0 })
+        M.update_scroll_pct(pane)
       end,
       -- Pane navigation
       ["<C-h>"] = function()
@@ -267,14 +339,17 @@ local function create(layout)
       end,
     },
     on_open = function(pane)
-      pane:set_lines(dummy_main)
-      -- Scroll to bottom
-      vim.schedule(function()
-        if pane:is_valid() then
-          local line_count = vim.api.nvim_buf_line_count(pane.buf)
-          pcall(vim.api.nvim_win_set_cursor, pane.win, { line_count, 0 })
-        end
-      end)
+      pane:set_lines(dummy_main, true)
+      -- Set up CursorMoved autocmd for scroll indicator
+      vim.api.nvim_create_autocmd("CursorMoved", {
+        callback = function()
+          if M.panes and M.panes.main and M.panes.main:is_valid() then
+            M.update_scroll_pct(M.panes.main)
+          end
+        end,
+        buffer = pane.buf,
+        group = layout.augroup,
+      })
     end,
   })
 
