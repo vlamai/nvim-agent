@@ -398,9 +398,7 @@ describe("layout", function()
       local input_pane = Layout.panes.input
       local main_pane = Layout.panes.main
       -- Set text in input
-      vim.bo[input_pane.buf].modifiable = true
       vim.api.nvim_buf_set_lines(input_pane.buf, 0, -1, false, { "Hello from test" })
-      vim.bo[input_pane.buf].modifiable = false
       -- Submit
       Layout._submit_input(input_pane, main_pane)
       -- Check main buffer contains the text
@@ -420,9 +418,7 @@ describe("layout", function()
       local input_pane = Layout.panes.input
       local main_pane = Layout.panes.main
       -- Set text in input
-      vim.bo[input_pane.buf].modifiable = true
       vim.api.nvim_buf_set_lines(input_pane.buf, 0, -1, false, { "Formatted message" })
-      vim.bo[input_pane.buf].modifiable = false
       -- Submit
       Layout._submit_input(input_pane, main_pane)
       -- Check main buffer has the box format
@@ -520,9 +516,7 @@ describe("layout", function()
       local input_pane = Layout.panes.input
       local main_pane = Layout.panes.main
       -- Set some text in input
-      vim.bo[input_pane.buf].modifiable = true
       vim.api.nvim_buf_set_lines(input_pane.buf, 0, -1, false, { "Hello world" })
-      vim.bo[input_pane.buf].modifiable = false
       -- Submit
       Layout._submit_input(input_pane, main_pane)
       -- Input should be cleared
@@ -537,9 +531,7 @@ describe("layout", function()
       local main_pane = Layout.panes.main
       local initial_lines = vim.api.nvim_buf_line_count(main_pane.buf)
       -- Set some text in input
-      vim.bo[input_pane.buf].modifiable = true
       vim.api.nvim_buf_set_lines(input_pane.buf, 0, -1, false, { "Test message" })
-      vim.bo[input_pane.buf].modifiable = false
       -- Submit
       Layout._submit_input(input_pane, main_pane)
       -- Main should have more lines
@@ -564,15 +556,15 @@ describe("layout", function()
       local input_pane = Layout.panes.input
       local main_pane = Layout.panes.main
       -- Set some text in input
-      vim.bo[input_pane.buf].modifiable = true
       vim.api.nvim_buf_set_lines(input_pane.buf, 0, -1, false, { "Test" })
-      vim.bo[input_pane.buf].modifiable = false
       -- Submit
       Layout._submit_input(input_pane, main_pane)
       -- Placeholder should be set
       local Config = require("agent-panel.config")
       local marks = vim.api.nvim_buf_get_extmarks(input_pane.buf, Config.ns, 0, -1, {})
       assert.is_true(#marks > 0)
+      -- Buffer should remain modifiable
+      assert.is_true(vim.bo[input_pane.buf].modifiable)
     end)
 
     it("input pane has correct height", function()

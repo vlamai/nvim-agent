@@ -445,9 +445,7 @@ function M._submit_input(input_pane, main_pane)
   vim.api.nvim_buf_set_lines(main_pane.buf, 0, -1, false, main_lines)
   vim.bo[main_pane.buf].modifiable = false
   -- Clear input
-  vim.bo[input_pane.buf].modifiable = true
   vim.api.nvim_buf_set_lines(input_pane.buf, 0, -1, false, { "" })
-  vim.bo[input_pane.buf].modifiable = false
   -- Reset placeholder
   Placeholder.set(input_pane.buf)
   -- Scroll main to bottom
@@ -793,18 +791,14 @@ local function create(layout)
       end,
       -- Clear and exit insert on Ctrl-C
       ["<C-c>"] = function(pane)
-        vim.bo[pane.buf].modifiable = true
         vim.api.nvim_buf_set_lines(pane.buf, 0, -1, false, { "" })
-        vim.bo[pane.buf].modifiable = false
         Placeholder.set(pane.buf)
         vim.cmd("stopinsert")
       end,
     },
     on_open = function(pane)
       -- Initialize empty buffer with placeholder
-      vim.bo[pane.buf].modifiable = true
       vim.api.nvim_buf_set_lines(pane.buf, 0, -1, false, { "" })
-      vim.bo[pane.buf].modifiable = false
       Placeholder.set(pane.buf)
       -- Set up autocmds for placeholder and auto-grow
       vim.api.nvim_create_autocmd({ "InsertEnter", "InsertLeave", "TextChanged" }, {
