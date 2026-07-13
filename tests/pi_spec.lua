@@ -52,4 +52,37 @@ describe("pi client", function()
     -- Should settle without error (abort is graceful)
     assert.is_true(settled)
   end)
+
+  it("get_entries returns session list", function()
+    local client = pi.new({})
+    assert.is_not_nil(client)
+
+    local entries = nil
+    client:get_entries(function(e)
+      entries = e
+    end)
+
+    -- Wait up to 10s for response
+    vim.wait(10000, function() return entries ~= nil end, 100)
+
+    client:dispose()
+    assert.is_not_nil(entries)
+    assert.is_table(entries)
+  end)
+
+  it("new_session creates a session", function()
+    local client = pi.new({})
+    assert.is_not_nil(client)
+
+    local session = nil
+    client:new_session(function(s)
+      session = s
+    end)
+
+    -- Wait up to 10s for response
+    vim.wait(10000, function() return session ~= nil end, 100)
+
+    client:dispose()
+    assert.is_not_nil(session)
+  end)
 end)
