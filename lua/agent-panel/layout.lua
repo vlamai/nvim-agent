@@ -301,6 +301,7 @@ end
 ---@param session_path string|nil
 function M._load_session_messages(session_path)
   if not M.client or not M.client:is_running() then
+    vim.notify("  ❌ Pi client not running", vim.log.levels.ERROR)
     return
   end
   -- If no path given, just clear the main pane
@@ -1257,7 +1258,7 @@ function M.update()
   for name, pane in pairs(M.panes) do
     local pos = positions[name]
     pane:open(vim.tbl_extend("force", pos, {
-      border = cfg.border,
+      border = name == "hints" and "none" or cfg.border,
       zindex = 50,
     }))
   end
