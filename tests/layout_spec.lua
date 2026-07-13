@@ -343,4 +343,110 @@ describe("layout", function()
       assert.is_nil(Layout._help_win)
     end)
   end)
+
+  describe("input pane", function()
+    it("input pane is created on open", function()
+      Layout.open()
+      assert.is_not_nil(Layout.panes.input)
+      assert.is_true(Layout.panes.input:is_valid())
+    end)
+
+    it("input pane starts empty", function()
+      Layout.open()
+      local lines = vim.api.nvim_buf_get_lines(Layout.panes.input.buf, 0, -1, false)
+      assert.are.equal(1, #lines)
+      assert.are.equal("", lines[1])
+    end)
+
+    it("input pane has placeholder extmark", function()
+      Layout.open()
+      local Config = require("agent-panel.config")
+      local marks = vim.api.nvim_buf_get_extmarks(Layout.panes.input.buf, Config.ns, 0, -1, {})
+      assert.is_true(#marks > 0)
+    end)
+
+    it("placeholder shows Ask me anything text", function()
+      Layout.open()
+      local Config = require("agent-panel.config")
+      local marks = vim.api.nvim_buf_get_extmarks(Layout.panes.input.buf, Config.ns, 0, -1, {
+        details = true,
+      })
+      assert.is_true(#marks > 0)
+      local virt_text = marks[1][4].virt_text
+      assert.is_not_nil(virt_text)
+      assert.is_truthy(virt_text[1][1]:match("Ask me anything"))
+    end)
+
+    it("_submit_input clears input buffer", function()
+      Layout.open()
+      local input_pane = Layout.panes.input
+      local main_pane = Layout.panes.main
+      -- Set some text in input
+      vim.bo[input_pane.buf].modifiable = true
+      vim.api.nvim_buf_set_lines(input_pane.buf, 0, -1, false, { "Hello world" })
+      vim.bo[input_pane.buf].modifiable = false
+      -- Submit
+      Layout._submit_input(input_pane, main_pane)
+      -- Input should be cleared
+      local lines = vim.api.nvim_buf_get_lines(input_pane.buf, 0, -1, false)
+      assert.are.equal(1, #lines)
+      assert.are.equal("", lines[1])
+    end)
+
+    it("_submit_input appends to main pane", function()
+      Layout.open()
+      local input_pane = Layout.panes.input
+      local main_pane = Layout.panes.main
+      local initial_lines = vim.api.nvim_buf_line_count(main_pane.buf)
+      -- Set some text in input
+      vim.bo[input_pane.buf].modifiable = true
+      vim.api.nvim_buf_set_lines(input_pane.buf, 0, -1, false, { "Test message" })
+      vim.bo[input_pane.buf].modifiable = false
+      -- Submit
+      Layout._submit_input(input_pane, main_pane)
+      -- Main should have more lines
+      local final_lines = vim.api.nvim_buf_line_count(main_pane.buf)
+      assert.is_true(final_lines > initial_lines)
+    end)
+
+    it("_submit_input does nothing on empty input", function()
+      Layout.open()
+      local input_pane = Layout.panes.input
+      local main_pane = Layout.panes.main
+      local initial_lines = vim.api.nvim_buf_line_count(main_pane.buf)
+      -- Submit empty input
+      Layout._submit_input(input_pane, main_pane)
+      -- Main should have same lines
+      local final_lines = vim.api.nvim_buf_line_count(main_pane.buf)
+      assert.are.equal(initial_lines, final_lines)
+    end)
+
+    it("_submit_input shows placeholder after submit", function()
+      Layout.open()
+      local input_pane = Layout.panes.input
+      local main_pane = Layout.panes.main
+      -- Set some text in input
+      vim.bo[input_pane.buf].modifiable = true
+      vim.api.nvim_buf_set_lines(input_pane.buf, 0, -1, false, { "Test" })
+      vim.bo[input_pane.buf].modifiable = false
+      -- Submit
+      Layout._submit_input(input_pane, main_pane)
+      -- Placeholder should be set
+      local Config = require("agent-panel.config")
+      local marks = vim.api.nvim_buf_get_extmarks(input_pane.buf, Config.ns, 0, -1, {})
+      assert.is_true(#marks > 0)
+    end)
+
+    it("input pane has correct height", function()
+      Layout.open()
+      local Config = require("agent-panel.config")
+      local height = vim.api.nvim_win_get_height(Layout.panes.input.win)
+      assert.are.equal(Config.input_height, height)
+    end)
+
+    it("input pane buffer exists", function()
+      Layout.open()
+      assert.is_true(vim.api.nvim_buf_is_valid(Layout.panes.input.buf))
+    end)
+  end)
 end)
