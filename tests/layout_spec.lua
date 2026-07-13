@@ -413,7 +413,7 @@ describe("layout", function()
       assert.is_true(found)
     end)
 
-    it("submitted text is in You box format", function()
+    it("submitted text is in You markdown format", function()
       Layout.open()
       local input_pane = Layout.panes.input
       local main_pane = Layout.panes.main
@@ -421,20 +421,25 @@ describe("layout", function()
       vim.api.nvim_buf_set_lines(input_pane.buf, 0, -1, false, { "Formatted message" })
       -- Submit
       Layout._submit_input(input_pane, main_pane)
-      -- Check main buffer has the box format
+      -- Check main buffer has the markdown format
       local main_lines = vim.api.nvim_buf_get_lines(main_pane.buf, 0, -1, false)
       local found_header = false
       local found_content = false
+      local found_separator = false
       for _, line in ipairs(main_lines) do
-        if line:match("┌─ You") then
+        if line:match("## You") then
           found_header = true
         end
         if line:match("Formatted message") then
           found_content = true
         end
+        if line:match("^---$") then
+          found_separator = true
+        end
       end
       assert.is_true(found_header)
       assert.is_true(found_content)
+      assert.is_true(found_separator)
     end)
   end)
 
@@ -577,6 +582,48 @@ describe("layout", function()
     it("input pane buffer exists", function()
       Layout.open()
       assert.is_true(vim.api.nvim_buf_is_valid(Layout.panes.input.buf))
+    end)
+  end)
+
+  describe("pi client integration", function()
+    it("client is spawned on open", function()
+      Layout.open()
+      assert.is_not_nil(Layout.client)
+      assert.is_true(Layout.client:is_running())
+    end)
+
+    it("client is disposed on close", function()
+      Layout.open()
+      assert.is_not_nil(Layout.client)
+      Layout.close()
+      assert.is_nil(Layout.client)
+    end)
+
+    it("prompt updates main pane buffer", function()
+      Layout.open()
+      local main_buf = Layout.panes.main.buf
+      local client = Layout.client
+      assert.is_not_nil(client)
+      assert.is_true(client:is_running())
+
+      local settled = false
+      local collected = {}
+      client:prompt("say just the word 'ok'", {
+        on_delta = function(delta)
+          table.insert(collected, delta)
+        end,
+        on_settled = function()
+          settled = true
+        end,
+        on_error = function(err)
+          settled = true
+        end,
+      })
+
+      vim.wait(30000, function() return settled end, 100)
+
+      local content = table.concat(collected, "")
+      assert.is_truthy(content:find("ok"))
     end)
   end)
 end)

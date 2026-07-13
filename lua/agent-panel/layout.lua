@@ -7,6 +7,9 @@ local M = {}
 
 local pane_order = { "sidebar", "main", "input" }
 
+---@type AgentPanel.PiClient|nil
+M.client = nil
+
 -- Position calculation
 ---@param cfg table
 ---@return table<string, {relative: string, row: integer, col: integer, width: integer, height: integer}>
@@ -166,41 +169,40 @@ end
 
 -- Dummy data for main
 local dummy_main = {
+  "## Agent",
   "",
-  "  ┌─ Agent ─────────────────────",
-  "  │",
-  "  │  Hello! I'm your AI assistant.",
-  "  │  How can I help you today?",
-  "  │",
-  "  └──────────────────────────────",
+  "Hello! I'm your AI assistant.",
+  "How can I help you today?",
   "",
-  "  ┌─ You ────────────────────────",
-  "  │",
-  "  │  Show me how to create a",
-  "  │  floating window in Neovim.",
-  "  │",
-  "  └──────────────────────────────",
+  "---",
   "",
-  "  ┌─ Agent ─────────────────────",
-  "  │",
-  "  │  Here's a basic example using",
-  "  │  nvim_open_win():",
-  "  │",
-  "  │    local buf = vim.api.nvim_create_buf(false, true)",
-  "  │    local win = vim.api.nvim_open_win(buf, true, {",
-  "  │      relative = 'editor',",
-  "  │      width = 40,",
-  "  │      height = 10,",
-  "  │      row = 5,",
-  "  │      col = 10,",
-  "  │      style = 'minimal',",
-  "  │      border = 'rounded',",
-  "  │    })",
-  "  │",
-  "  │  This creates a centered floating",
-  "  │  window with rounded borders.",
-  "  │",
-  "  └──────────────────────────────",
+  "## You",
+  "",
+  "Show me how to create a",
+  "floating window in Neovim.",
+  "",
+  "---",
+  "",
+  "## Agent",
+  "",
+  "Here's a basic example using",
+  "nvim_open_win():",
+  "",
+  "```lua",
+  "local buf = vim.api.nvim_create_buf(false, true)",
+  "local win = vim.api.nvim_open_win(buf, true, {",
+  "  relative = 'editor',",
+  "  width = 40,",
+  "  height = 10,",
+  "  row = 5,",
+  "  col = 10,",
+  "  style = 'minimal',",
+  "  border = 'rounded',",
+  "})",
+  "```",
+  "",
+  "This creates a centered floating",
+  "window with rounded borders.",
 }
 
 ---Apply border highlights to all panes based on active pane
@@ -257,7 +259,7 @@ end
 ---Hints content for each pane
 local hints_text = {
   sidebar = "  j/k: navigate  \195\137: select  dd: delete  a: add  ?: help  q: quit",
-  main = "  j/k: scroll  G/gg: top/bottom  Ctrl+d/u: half-page  ?: help  q: quit",
+  main = "  j/k: scroll  G/gg: top/bottom  Ctrl+d/u: half-page  Ctrl+c: abort  ?: help  q: quit",
   input = "  \195\137: send  Ctrl+c: clear  Ctrl+h/l: switch pane  Esc: normal mode",
 }
 
@@ -290,6 +292,7 @@ local help_lines = {
   "    j / k         Scroll",
   "    G / gg        Bottom / Top",
   "    Ctrl+d/u      Half page",
+  "    Ctrl+c        Abort generation",
   "    Ctrl+h        Focus sidebar",
   "",
   "  Input",
@@ -397,6 +400,116 @@ function Placeholder.has_content(buf)
   return true
 end
 
+---Append lines to main pane buffer
+---@param main_pane AgentPanel.Pane
+---@param new_lines string[]
+local function append_to_main(main_pane, new_lines)
+  vim.bo[main_pane.buf].modifiable = true
+  local main_lines = vim.api.nvim_buf_get_lines(main_pane.buf, 0, -1, false)
+  -- Find the last non-empty line
+  local insert_at = #main_lines
+  while insert_at > 1 and vim.trim(main_lines[insert_at]) == "" do
+    insert_at = insert_at - 1
+  end
+  insert_at = insert_at + 1
+  -- Insert the new content
+  for i, line in ipairs(new_lines) do
+    table.insert(main_lines, insert_at + i - 1, line)
+  end
+  vim.api.nvim_buf_set_lines(main_pane.buf, 0, -1, false, main_lines)
+  vim.bo[main_pane.buf].modifiable = false
+end
+
+---Show thinking indicator in main pane
+---@param main_pane AgentPanel.Pane
+function M._show_thinking(main_pane)
+  if not main_pane:is_valid() then return end
+  vim.bo[main_pane.buf].modifiable = true
+  local main_lines = vim.api.nvim_buf_get_lines(main_pane.buf, 0, -1, false)
+  local insert_at = #main_lines
+  while insert_at > 1 and vim.trim(main_lines[insert_at]) == "" do
+    insert_at = insert_at - 1
+  end
+  insert_at = insert_at + 1
+  table.insert(main_lines, insert_at, "## Agent")
+  table.insert(main_lines, insert_at + 1, "")
+  table.insert(main_lines, insert_at + 2, "  ⏳ Agent is thinking...")
+  table.insert(main_lines, insert_at + 3, "")
+  vim.api.nvim_buf_set_lines(main_pane.buf, 0, -1, false, main_lines)
+  vim.bo[main_pane.buf].modifiable = false
+  M._scroll_to_bottom(main_pane)
+end
+
+---Remove thinking indicator lines from main pane
+---@param main_pane AgentPanel.Pane
+function M._remove_thinking(main_pane)
+  if not main_pane:is_valid() then return end
+  vim.bo[main_pane.buf].modifiable = true
+  local main_lines = vim.api.nvim_buf_get_lines(main_pane.buf, 0, -1, false)
+  -- Remove lines containing the thinking indicator
+  local new_lines = {}
+  local skip_next = false
+  for i, line in ipairs(main_lines) do
+    if line:find("Agent is thinking") then
+      -- Skip this line and the blank lines around it
+      skip_next = true
+    elseif skip_next and line == "" then
+      skip_next = false
+    elseif not skip_next then
+      table.insert(new_lines, line)
+    end
+  end
+  vim.api.nvim_buf_set_lines(main_pane.buf, 0, -1, false, new_lines)
+  vim.bo[main_pane.buf].modifiable = false
+end
+
+---Append streaming delta to main pane (replaces thinking indicator on first delta)
+---@param main_pane AgentPanel.Pane
+---@param delta string
+---@param is_first boolean
+function M._append_delta(main_pane, delta, is_first)
+  if not main_pane:is_valid() then return end
+  vim.bo[main_pane.buf].modifiable = true
+  local main_lines = vim.api.nvim_buf_get_lines(main_pane.buf, 0, -1, false)
+  if is_first then
+    -- Remove thinking indicator, then append response content
+    local cleaned = {}
+    local skip_thinking = false
+    for _, line in ipairs(main_lines) do
+      if line:find("Agent is thinking") then
+        skip_thinking = true
+      elseif skip_thinking and line == "" then
+        skip_thinking = false
+      elseif not skip_thinking then
+        table.insert(cleaned, line)
+      end
+    end
+    main_lines = cleaned
+  end
+  -- Get last line and append delta
+  if #main_lines > 0 then
+    main_lines[#main_lines] = main_lines[#main_lines] .. delta
+  else
+    table.insert(main_lines, delta)
+  end
+  vim.api.nvim_buf_set_lines(main_pane.buf, 0, -1, false, main_lines)
+  vim.bo[main_pane.buf].modifiable = false
+  M._scroll_to_bottom(main_pane)
+end
+
+---Finalize response with blank line and separator
+---@param main_pane AgentPanel.Pane
+function M._finalize_response(main_pane)
+  if not main_pane:is_valid() then return end
+  vim.bo[main_pane.buf].modifiable = true
+  local main_lines = vim.api.nvim_buf_get_lines(main_pane.buf, 0, -1, false)
+  table.insert(main_lines, "")
+  table.insert(main_lines, "---")
+  vim.api.nvim_buf_set_lines(main_pane.buf, 0, -1, false, main_lines)
+  vim.bo[main_pane.buf].modifiable = false
+  M._scroll_to_bottom(main_pane)
+end
+
 ---Submit input text to main pane
 ---@param input_pane AgentPanel.Pane
 ---@param main_pane AgentPanel.Pane
@@ -411,45 +524,62 @@ function M._submit_input(input_pane, main_pane)
   if text == "" then
     return
   end
-  -- Format as box
+  -- Check if client is available
+  if not M.client or not M.client:is_running() then
+    vim.notify("  ❌ Pi client not connected", vim.log.levels.ERROR)
+    return
+  end
+  -- Format user message as markdown
   local input_lines = vim.split(text, "\n", { plain = true })
-  -- Calculate content width
-  local max_width = 0
+  local box_lines = { "## You", "" }
   for _, line in ipairs(input_lines) do
-    max_width = math.max(max_width, vim.fn.strdisplaywidth(line))
+    table.insert(box_lines, line)
   end
-  max_width = math.max(max_width, 20) -- minimum width
-  -- Build box
-  local top = string.format("  ┌─ You ─%s┐", string.rep("─", max_width - 4))
-  local bottom = string.format("  └%s┘", string.rep("─", max_width + 2))
-  local box_lines = { "", top, "  │" }
-  for _, line in ipairs(input_lines) do
-    local padding = max_width - vim.fn.strdisplaywidth(line)
-    table.insert(box_lines, "  │  " .. line .. string.rep(" ", padding) .. " │")
-  end
-  table.insert(box_lines, "  │")
-  table.insert(box_lines, bottom)
-  -- Append to main pane
-  vim.bo[main_pane.buf].modifiable = true
-  local main_lines = vim.api.nvim_buf_get_lines(main_pane.buf, 0, -1, false)
-  -- Find the last non-empty line
-  local insert_at = #main_lines
-  while insert_at > 1 and vim.trim(main_lines[insert_at]) == "" do
-    insert_at = insert_at - 1
-  end
-  insert_at = insert_at + 1
-  -- Insert the new content
-  for i, line in ipairs(box_lines) do
-    table.insert(main_lines, insert_at + i - 1, line)
-  end
-  vim.api.nvim_buf_set_lines(main_pane.buf, 0, -1, false, main_lines)
-  vim.bo[main_pane.buf].modifiable = false
+  table.insert(box_lines, "")
+  table.insert(box_lines, "---")
+  table.insert(box_lines, "")
+  -- Append user message to main pane
+  append_to_main(main_pane, box_lines)
   -- Clear input
   vim.api.nvim_buf_set_lines(input_pane.buf, 0, -1, false, { "" })
-  -- Reset placeholder
   Placeholder.set(input_pane.buf)
-  -- Scroll main to bottom
-  M._scroll_to_bottom(main_pane)
+  -- Show thinking indicator
+  M._show_thinking(main_pane)
+  -- Send to pi client
+  local is_first = true
+  M.client:prompt(text, {
+    on_delta = function(delta)
+      vim.schedule(function()
+        M._append_delta(main_pane, delta, is_first)
+        is_first = false
+      end)
+    end,
+    on_settled = function()
+      vim.schedule(function()
+        M._finalize_response(main_pane)
+      end)
+    end,
+    on_error = function(err)
+      vim.schedule(function()
+        M._remove_thinking(main_pane)
+        vim.bo[main_pane.buf].modifiable = true
+        local main_lines = vim.api.nvim_buf_get_lines(main_pane.buf, 0, -1, false)
+        local insert_at = #main_lines
+        while insert_at > 1 and vim.trim(main_lines[insert_at]) == "" do
+          insert_at = insert_at - 1
+        end
+        insert_at = insert_at + 1
+        table.insert(main_lines, insert_at, "## Agent")
+        table.insert(main_lines, insert_at + 1, "")
+        table.insert(main_lines, insert_at + 2, "  ❌ Error: " .. (err or "unknown error"))
+        table.insert(main_lines, insert_at + 3, "")
+        table.insert(main_lines, insert_at + 4, "---")
+        vim.api.nvim_buf_set_lines(main_pane.buf, 0, -1, false, main_lines)
+        vim.bo[main_pane.buf].modifiable = false
+        M._scroll_to_bottom(main_pane)
+      end)
+    end,
+  })
 end
 
 ---Auto-grow input pane based on content
@@ -731,6 +861,24 @@ local function create(layout)
       ["?"] = function()
         M._show_help()
       end,
+      -- Abort generation
+      ["<C-c>"] = function()
+        if M.client and M.client._state == "streaming" then
+          M.client:abort()
+          vim.bo[pane.buf].modifiable = true
+          local main_lines = vim.api.nvim_buf_get_lines(pane.buf, 0, -1, false)
+          local insert_at = #main_lines
+          while insert_at > 1 and vim.trim(main_lines[insert_at]) == "" do
+            insert_at = insert_at - 1
+          end
+          insert_at = insert_at + 1
+          table.insert(main_lines, insert_at, "")
+          table.insert(main_lines, insert_at + 1, "  ⚠ Aborted")
+          vim.api.nvim_buf_set_lines(pane.buf, 0, -1, false, main_lines)
+          vim.bo[pane.buf].modifiable = false
+          M._scroll_to_bottom(pane)
+        end
+      end,
     },
     on_open = function(pane)
       pane:set_lines(dummy_main, true)
@@ -849,6 +997,9 @@ function M.open()
   create(M)
   M.update()
   M.focus("sidebar")
+  -- Spawn pi client
+  local PiClient = require("agent-panel.pi")
+  M.client = PiClient.new({})
 end
 
 function M.update()
@@ -880,6 +1031,11 @@ function M.close()
   if M._help_win and vim.api.nvim_win_is_valid(M._help_win) then
     pcall(vim.api.nvim_win_close, M._help_win, true)
     M._help_win = nil
+  end
+  -- Dispose pi client
+  if M.client then
+    pcall(function() M.client:dispose() end)
+    M.client = nil
   end
   if M.panes then
     for _, pane in pairs(M.panes) do
