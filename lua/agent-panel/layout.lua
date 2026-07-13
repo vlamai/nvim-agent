@@ -48,8 +48,9 @@ local function is_skip_line(line)
   if line:match("^%s*[─]+$") then
     return true
   end
-  -- Header lines (starts with emoji)
-  if line:match("^%s*[📋⚙]") then
+  -- Header lines (starts with clipboard or gear emoji)  -- Use plain string matching to avoid multi-byte character issues
+  local trimmed = line:match("^%s*(.*)") or line
+  if trimmed:sub(1, #"📋") == "📋" or trimmed:sub(1, #"⚙") == "⚙" then
     return true
   end
   return false
@@ -247,6 +248,145 @@ function M._scroll_to_bottom(pane)
   if pane:is_valid() then
     local line_count = vim.api.nvim_buf_line_count(pane.buf)
     pcall(vim.api.nvim_win_set_cursor, pane.win, { line_count, 0 })
+  end
+end
+
+---Input pane placeholder management
+local Placeholder = {}
+local PLACEHOLDER_TEXT = "Ask me anything..."
+
+---Set placeholder extmark on input buffer
+---@param buf integer
+function Placeholder.set(buf)
+  if not vim.api.nvim_buf_is_valid(buf) then
+    return
+  end
+  local Config = require("agent-panel.config")
+  -- Clear existing placeholder
+  Placeholder.clear(buf)
+  -- Only set if buffer is empty
+  local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+  local content = table.concat(lines, "")
+  if content == "" or ( #lines == 1 and lines[1] == "" ) then
+    vim.api.nvim_buf_set_extmark(buf, Config.ns, 0, 0, {
+      virt_text = { { "  " .. PLACEHOLDER_TEXT, "Comment" } },
+      virt_text_pos = "overlay",
+      right_gravity = true,
+    })
+  end
+end
+
+---Clear placeholder extmark from input buffer
+---@param buf integer
+function Placeholder.clear(buf)
+  if not vim.api.nvim_buf_is_valid(buf) then
+    return
+  end
+  local Config = require("agent-panel.config")
+  local marks = vim.api.nvim_buf_get_extmarks(buf, Config.ns, 0, -1, {})
+  for _, mark in ipairs(marks) do
+    vim.api.nvim_buf_del_extmark(buf, Config.ns, mark[1])
+  end
+end
+
+---Check if buffer has content (non-empty)
+---@param buf integer
+---@return boolean
+function Placeholder.has_content(buf)
+  if not vim.api.nvim_buf_is_valid(buf) then
+    return false
+  end
+  local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+  if #lines == 0 then
+    return false
+  end
+  if #lines == 1 and lines[1] == "" then
+    return false
+  end
+  return true
+end
+
+---Submit input text to main pane
+---@param input_pane AgentPanel.Pane
+---@param main_pane AgentPanel.Pane
+function M._submit_input(input_pane, main_pane)
+  if not input_pane:is_valid() or not main_pane:is_valid() then
+    return
+  end
+  -- Get input text
+  local lines = vim.api.nvim_buf_get_lines(input_pane.buf, 0, -1, false)
+  local text = table.concat(lines, "\n")
+  text = vim.trim(text)
+  if text == "" then
+    return
+  end
+  -- Format as box
+  local input_lines = vim.split(text, "\n", { plain = true })
+  -- Calculate content width
+  local max_width = 0
+  for _, line in ipairs(input_lines) do
+    max_width = math.max(max_width, vim.fn.strdisplaywidth(line))
+  end
+  max_width = math.max(max_width, 20) -- minimum width
+  -- Build box
+  local top = string.format("  ┌─ You ─%s┐", string.rep("─", max_width - 4))
+  local bottom = string.format("  └%s┘", string.rep("─", max_width + 2))
+  local box_lines = { "", top, "  │" }
+  for _, line in ipairs(input_lines) do
+    local padding = max_width - vim.fn.strdisplaywidth(line)
+    table.insert(box_lines, "  │  " .. line .. string.rep(" ", padding) .. " │")
+  end
+  table.insert(box_lines, "  │")
+  table.insert(box_lines, bottom)
+  -- Append to main pane
+  vim.bo[main_pane.buf].modifiable = true
+  local main_lines = vim.api.nvim_buf_get_lines(main_pane.buf, 0, -1, false)
+  -- Find the last non-empty line
+  local insert_at = #main_lines
+  while insert_at > 1 and vim.trim(main_lines[insert_at]) == "" do
+    insert_at = insert_at - 1
+  end
+  insert_at = insert_at + 1
+  -- Insert the new content
+  for i, line in ipairs(box_lines) do
+    table.insert(main_lines, insert_at + i - 1, line)
+  end
+  vim.api.nvim_buf_set_lines(main_pane.buf, 0, -1, false, main_lines)
+  vim.bo[main_pane.buf].modifiable = false
+  -- Clear input
+  vim.bo[input_pane.buf].modifiable = true
+  vim.api.nvim_buf_set_lines(input_pane.buf, 0, -1, false, { "" })
+  vim.bo[input_pane.buf].modifiable = false
+  -- Reset placeholder
+  Placeholder.set(input_pane.buf)
+  -- Scroll main to bottom
+  M._scroll_to_bottom(main_pane)
+end
+
+---Auto-grow input pane based on content
+---@param pane AgentPanel.Pane
+function M._autoGrow_input(pane)
+  if not pane:is_valid() then
+    return
+  end
+  local Config = require("agent-panel.config")
+  local min_height = Config.input_height or 3
+  local max_height = 5
+  local lines = vim.api.nvim_buf_get_lines(pane.buf, 0, -1, false)
+  local line_count = #lines
+  -- Account for wrapped lines
+  local total_height = 0
+  for _, line in ipairs(lines) do
+    local display_width = vim.fn.strdisplaywidth(line)
+    local win_width = vim.api.nvim_win_get_width(pane.win) - 4 -- account for border/padding
+    local wrapped = math.max(1, math.ceil(display_width / win_width))
+    total_height = total_height + wrapped
+  end
+  total_height = math.max(total_height, 1)
+  local new_height = math.max(min_height, math.min(max_height, total_height))
+  local cur_height = vim.api.nvim_win_get_height(pane.win)
+  if new_height ~= cur_height then
+    vim.api.nvim_win_set_config(pane.win, { height = new_height })
   end
 end
 
@@ -507,10 +647,6 @@ local function create(layout)
       ["<Esc>"] = function()
         vim.cmd("stopinsert")
       end,
-      ["<C-c>"] = function(pane)
-        vim.cmd("stopinsert")
-        pane:set_lines({ "" })
-      end,
       -- Pane navigation (stop insert before navigating)
       ["<C-h>"] = function()
         vim.cmd("stopinsert")
@@ -529,8 +665,67 @@ local function create(layout)
         M.nav_left()
       end,
     },
+    insert_keymaps = {
+      -- Submit on Enter
+      ["<CR>"] = function(pane)
+        if M.panes and M.panes.main then
+          M._submit_input(pane, M.panes.main)
+        end
+      end,
+      -- Newline on Shift-Enter
+      ["<S-CR>"] = function(pane)
+        vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<CR>", true, false, true), "n", false)
+      end,
+      -- Clear and exit insert on Ctrl-C
+      ["<C-c>"] = function(pane)
+        vim.bo[pane.buf].modifiable = true
+        vim.api.nvim_buf_set_lines(pane.buf, 0, -1, false, { "" })
+        vim.bo[pane.buf].modifiable = false
+        Placeholder.set(pane.buf)
+        vim.cmd("stopinsert")
+      end,
+    },
     on_open = function(pane)
-      pane:set_lines({ "  Ask me anything..." })
+      -- Initialize empty buffer with placeholder
+      vim.bo[pane.buf].modifiable = true
+      vim.api.nvim_buf_set_lines(pane.buf, 0, -1, false, { "" })
+      vim.bo[pane.buf].modifiable = false
+      Placeholder.set(pane.buf)
+      -- Set up autocmds for placeholder and auto-grow
+      vim.api.nvim_create_autocmd({ "InsertEnter", "InsertLeave", "TextChanged" }, {
+        buffer = pane.buf,
+        group = layout.augroup,
+        callback = function(ev)
+          if not pane:is_valid() then
+            return
+          end
+          local event = ev.event
+          if event == "InsertEnter" then
+            -- Clear placeholder on entering insert mode
+            Placeholder.clear(pane.buf)
+          elseif event == "InsertLeave" then
+            -- Re-show placeholder if buffer is empty
+            if not Placeholder.has_content(pane.buf) then
+              Placeholder.set(pane.buf)
+            end
+          elseif event == "TextChanged" then
+            -- Update placeholder based on content
+            if not Placeholder.has_content(pane.buf) then
+              Placeholder.set(pane.buf)
+            else
+              Placeholder.clear(pane.buf)
+            end
+          end
+        end,
+      })
+      -- Auto-grow on TextChangedI
+      vim.api.nvim_create_autocmd("TextChangedI", {
+        buffer = pane.buf,
+        group = layout.augroup,
+        callback = function()
+          M._autoGrow_input(pane)
+        end,
+      })
     end,
   })
 end

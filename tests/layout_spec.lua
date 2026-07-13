@@ -248,12 +248,11 @@ describe("layout", function()
       assert.is_true(#Layout.sidebar_items > 0)
     end)
 
-    it("sidebar starts with cursor on first item", function()
+    it("sidebar opens with cursor at line 1", function()
       Layout.open()
       Layout.focus("sidebar")
       local cursor = vim.api.nvim_win_get_cursor(Layout.panes.sidebar.win)
-      -- Should be on line 3 (first selectable item, after header + separator)
-      assert.are.equal(3, cursor[1])
+      assert.are.equal(1, cursor[1])
     end)
 
     it("_add_sidebar_item adds to list", function()
@@ -269,9 +268,15 @@ describe("layout", function()
       Layout.open()
       Layout.focus("sidebar")
       local initial_count = #Layout.sidebar_items
-      -- Delete the first item (line 3)
+      -- Delete the first item (line 3 in buffer)
       Layout._delete_sidebar_item(3)
       assert.are.equal(initial_count - 1, #Layout.sidebar_items)
+    end)
+
+    it("sidebar_items has correct count", function()
+      Layout.open()
+      -- default_sidebar_items has 8 entries
+      assert.are.equal(8, #Layout.sidebar_items)
     end)
 
     it("_delete_sidebar_item does not delete skip lines", function()
