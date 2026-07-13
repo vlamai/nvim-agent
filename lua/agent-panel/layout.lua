@@ -176,35 +176,105 @@ function M._render_sidebar()
   M.panes.sidebar:set_lines(new_lines)
 end
 
----Fetch sessions from pi RPC and re-render sidebar
-function M.refresh_sessions()
-  if not M.client or not M.client:is_running() then
-    return
+---Get the session directory for the current project
+---@return string|nil
+local function get_session_dir()
+  local cwd = vim.fn.getcwd()
+  -- Convert path to session directory format: /Users/q/code/project -> --Users-q-code-project--
+  local session_dir_name = cwd:gsub("/", "-"):gsub("^%-", ""):gsub("%-+$", "")
+  local base_dir = vim.fn.expand("~/.pi/agent/sessions")
+  local session_dir = base_dir .. "/" .. session_dir_name
+  if vim.fn.isdirectory(session_dir) == 1 then
+    return session_dir
   end
-  M.client:get_entries(function(entries)
-    vim.schedule(function()
-      M.sessions = {}
-      if entries then
-        for _, entry in ipairs(entries) do
-          local path = entry.path or entry.sessionPath or ""
-          local title = entry.title or entry.name or vim.fn.fnamemodify(path, ":t") or "Untitled"
-          local is_active = (path ~= "" and path == M.active_session_path)
-          table.insert(M.sessions, {
-            path = path,
-            title = title,
-            is_active = is_active,
-          })
+  return nil
+end
+
+---Read the first user message from a session file as the title
+---@param filepath string
+---@return string
+local function get_session_title(filepath)
+  local file = io.open(filepath, "r")
+  if not file then
+    return "Untitled"
+  end
+  local header_line = file:read("*l")
+  if not header_line then
+    file:close()
+    return "Untitled"
+  end
+  -- Parse header to get session info
+  local ok, header = pcall(vim.json.decode, header_line)
+  if not ok or not header then
+    file:close()
+    return "Untitled"
+  end
+  -- Look for first user message
+  for line in file:lines() do
+    if line and line ~= "" then
+      local entry_ok, entry = pcall(vim.json.decode, line)
+      if entry_ok and entry and entry.type == "message" and entry.message then
+        if entry.message.role == "user" then
+          local content = entry.message.content
+          local text = ""
+          if type(content) == "string" then
+            text = content
+          elseif type(content) == "table" then
+            for _, block in ipairs(content) do
+              if block.type == "text" and block.text then
+                text = block.text
+                break
+              end
+            end
+          end
+          -- Truncate long titles
+          if #text > 50 then
+            text = text:sub(1, 47) .. "..."
+          end
+          -- Clean up newlines
+          text = text:gsub("\n", " ")
+          file:close()
+          return text ~= "" and text or "Untitled"
         end
       end
-      -- Sort: active session first, then by title
-      table.sort(M.sessions, function(a, b)
-        if a.is_active then return true end
-        if b.is_active then return false end
-        return a.title < b.title
-      end)
-      M._render_sidebar()
-    end)
+    end
+  end
+  file:close()
+  return "Untitled"
+end
+
+---Fetch sessions from filesystem and re-render sidebar
+function M.refresh_sessions()
+  local session_dir = get_session_dir()
+  if not session_dir then
+    M.sessions = {}
+    M._render_sidebar()
+    return
+  end
+  -- Read all .jsonl files in the session directory
+  local sessions = {}
+  local files = vim.fn.readdir(session_dir)
+  for _, filename in ipairs(files) do
+    if filename:match("%.jsonl$") then
+      local filepath = session_dir .. "/" .. filename
+      local title = get_session_title(filepath)
+      local is_active = (filepath == M.active_session_path)
+      table.insert(sessions, {
+        path = filepath,
+        title = title,
+        is_active = is_active,
+      })
+    end
+  end
+  M.sessions = sessions
+  -- Sort: active session first, then by modification time (newest first)
+  table.sort(M.sessions, function(a, b)
+    if a.is_active then return true end
+    if b.is_active then return false end
+    -- Sort by filename (which contains timestamp) descending
+    return a.path > b.path
   end)
+  M._render_sidebar()
 end
 
 ---Load messages for a session into the main pane
