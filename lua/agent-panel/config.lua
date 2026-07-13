@@ -26,9 +26,16 @@ setmetatable(M, {
 M.augroup = vim.api.nvim_create_augroup("agent-panel", { clear = true })
 M.ns = vim.api.nvim_create_namespace("agent-panel")
 
+---Define highlight groups for active/inactive pane borders
+function M.setup_highlights()
+  vim.api.nvim_set_hl(0, "AgentPanelBorderActive", { link = "FloatBorder", default = true })
+  vim.api.nvim_set_hl(0, "AgentPanelBorderInactive", { link = "Comment", default = true })
+end
+
 ---@param opts? AgentPanel.UserOptions
 function M.setup(opts)
   config = vim.tbl_deep_extend("force", {}, vim.deepcopy(defaults), opts or {})
+  M.setup_highlights()
 end
 
 return M

@@ -1,7 +1,10 @@
 ---@class AgentPanel.Layout
 ---@field panes table<string, AgentPanel.Pane>|nil
 ---@field augroup integer|nil
+---@field active_pane string|nil
 local M = {}
+
+local pane_order = { "sidebar", "main", "input" }
 
 -- Position calculation
 ---@param cfg table
@@ -87,6 +90,96 @@ local dummy_main = {
   "  └──────────────────────────────",
 }
 
+---Apply border highlights to all panes based on active pane
+function M._apply_highlights()
+  if not M.panes then
+    return
+  end
+  for name, pane in pairs(M.panes) do
+    if pane:is_valid() then
+      if name == M.active_pane then
+        vim.wo[pane.win].winhl = "FloatBorder:AgentPanelBorderActive"
+      else
+        vim.wo[pane.win].winhl = "FloatBorder:AgentPanelBorderInactive"
+      end
+    end
+  end
+end
+
+---Navigate to the next pane to the right (wraps): sidebar→main→input→sidebar
+function M.nav_right()
+  if not M.active_pane then
+    return
+  end
+  local idx = 1
+  for i, name in ipairs(pane_order) do
+    if M.active_pane == name then
+      idx = i
+      break
+    end
+  end
+  local next_idx = (idx % #pane_order) + 1
+  M.focus(pane_order[next_idx])
+end
+
+---Navigate to the next pane to the left (wraps): input→main→sidebar→input
+function M.nav_left()
+  if not M.active_pane then
+    return
+  end
+  local idx = 1
+  for i, name in ipairs(pane_order) do
+    if M.active_pane == name then
+      idx = i
+      break
+    end
+  end
+  local prev_idx = ((idx - 2) % #pane_order) + 1
+  M.focus(pane_order[prev_idx])
+end
+
+---@param name "sidebar"|"main"|"input"
+function M.focus(name)
+  if not M.panes or not M.panes[name] then
+    return
+  end
+
+  -- Handle leaving current pane
+  if M.active_pane and M.panes[M.active_pane] then
+    local old = M.panes[M.active_pane]
+    if old:is_valid() then
+      -- Stop insert when leaving input pane
+      if M.active_pane == "input" then
+        pcall(vim.cmd, "stopinsert")
+      end
+      -- Disable cursorline on sidebar when leaving
+      if M.active_pane == "sidebar" then
+        vim.wo[old.win].cursorline = false
+      end
+    end
+  end
+
+  M.active_pane = name
+  M.panes[name]:focus()
+
+  -- Apply border highlights to all panes
+  M._apply_highlights()
+
+  -- Enable cursorline on sidebar when focused
+  if name == "sidebar" and M.panes.sidebar:is_valid() then
+    vim.wo[M.panes.sidebar.win].cursorline = true
+  end
+
+  -- Enter insert mode when focusing input pane
+  if name == "input" and M.panes.input:is_valid() then
+    vim.schedule(function()
+      if M.panes and M.panes.input and M.panes.input:is_valid() then
+        vim.cmd("startinsert")
+      end
+    end)
+  end
+end
+
 local function create(layout)
   local Pane = require("agent-panel.pane")
   local Config = require("agent-panel.config")
@@ -96,7 +189,7 @@ local function create(layout)
   -- Sidebar
   layout.panes.sidebar = Pane.new("sidebar", {
     ft = "agent-panel-sidebar",
-    wo = { cursorline = true, wrap = false, number = false, relativenumber = false, signcolumn = "no" },
+    wo = { cursorline = false, wrap = false, number = false, relativenumber = false, signcolumn = "no" },
     bo = { modifiable = false },
     keymaps = {
       ["q"] = function()
@@ -121,8 +214,18 @@ local function create(layout)
       ["<CR>"] = function()
         -- placeholder: select sidebar item
       end,
+      -- Pane navigation
+      ["<C-h>"] = function()
+        M.nav_left()
+      end,
       ["<C-l>"] = function()
-        M.focus("main")
+        M.nav_right()
+      end,
+      ["<C-j>"] = function()
+        M.nav_right()
+      end,
+      ["<C-k>"] = function()
+        M.nav_left()
       end,
     },
     on_open = function(pane)
@@ -149,8 +252,18 @@ local function create(layout)
       ["gg"] = function(pane)
         vim.api.nvim_win_set_cursor(pane.win, { 1, 0 })
       end,
+      -- Pane navigation
       ["<C-h>"] = function()
-        M.focus("sidebar")
+        M.nav_left()
+      end,
+      ["<C-l>"] = function()
+        M.nav_right()
+      end,
+      ["<C-j>"] = function()
+        M.nav_right()
+      end,
+      ["<C-k>"] = function()
+        M.nav_left()
       end,
     },
     on_open = function(pane)
@@ -178,31 +291,26 @@ local function create(layout)
         vim.cmd("stopinsert")
         pane:set_lines({ "" })
       end,
+      -- Pane navigation (stop insert before navigating)
       ["<C-h>"] = function()
         vim.cmd("stopinsert")
-        M.focus("sidebar")
+        M.nav_left()
       end,
       ["<C-l>"] = function()
         vim.cmd("stopinsert")
-        M.focus("main")
+        M.nav_right()
+      end,
+      ["<C-j>"] = function()
+        vim.cmd("stopinsert")
+        M.nav_right()
+      end,
+      ["<C-k>"] = function()
+        vim.cmd("stopinsert")
+        M.nav_left()
       end,
     },
     on_open = function(pane)
       pane:set_lines({ "  Ask me anything..." })
-      -- Enter insert mode on focus
-      vim.api.nvim_create_autocmd("WinEnter", {
-        callback = function()
-          if pane:is_valid() and vim.api.nvim_get_current_win() == pane.win then
-            vim.schedule(function()
-              if pane:is_valid() then
-                vim.api.nvim_win_set_cursor(pane.win, { 1, 0 })
-                vim.cmd("startinsert")
-              end
-            end)
-          end
-        end,
-        group = layout.augroup,
-      })
     end,
   })
 end
@@ -216,7 +324,7 @@ function M.open()
   end
   create(M)
   M.update()
-  M.panes.sidebar:focus()
+  M.focus("sidebar")
 end
 
 function M.update()
@@ -239,6 +347,8 @@ function M.update()
       zindex = 50,
     }))
   end
+  -- Re-apply highlights after updating window positions
+  M._apply_highlights()
 end
 
 function M.close()
@@ -248,6 +358,7 @@ function M.close()
     end
     M.panes = nil
   end
+  M.active_pane = nil
   if M.augroup then
     pcall(vim.api.nvim_del_augroup_by_id, M.augroup)
     M.augroup = nil
@@ -265,13 +376,6 @@ end
 ---@return boolean
 function M.is_open()
   return M.panes ~= nil and M.panes.main ~= nil and M.panes.main:is_valid()
-end
-
----@param name "sidebar"|"main"|"input"
-function M.focus(name)
-  if M.panes and M.panes[name] then
-    M.panes[name]:focus()
-  end
 end
 
 return M
