@@ -29,25 +29,25 @@
       "id": "3",
       "subject": "Написать тесты для floating window",
       "description": "Создать tests/window_spec.lua с тестами: создание окна, закрытие, проверка буфера, настройки окна",
-      "status": "in_progress",
+      "status": "completed",
       "activeForm": "Пишу тесты",
       "metadata": {},
       "blocks": [],
       "blockedBy": [],
       "createdAt": 1783955296236,
-      "updatedAt": 1783955365768
+      "updatedAt": 1783955411537
     },
     {
       "id": "4",
       "subject": "Добавить интеграцию с lazy.nvim и инструкции",
       "description": "Создать пример конфигурации для lazy.nvim в README, чтобы пользователь мог установить плагин",
-      "status": "pending",
+      "status": "in_progress",
       "activeForm": "Пишу инструкции",
       "metadata": {},
       "blocks": [],
       "blockedBy": [],
       "createdAt": 1783955296238,
-      "updatedAt": 1783955296238
+      "updatedAt": 1783955411538
     }
   ]
 }
