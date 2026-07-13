@@ -181,7 +181,7 @@ end
 local function get_session_dir()
   local cwd = vim.fn.getcwd()
   -- Convert path to session directory format: /Users/q/code/project -> --Users-q-code-project--
-  local session_dir_name = cwd:gsub("/", "-"):gsub("^%-", ""):gsub("%-+$", "")
+  local session_dir_name = "--" .. cwd:gsub("/", "-") .. "--"
   local base_dir = vim.fn.expand("~/.pi/agent/sessions")
   local session_dir = base_dir .. "/" .. session_dir_name
   if vim.fn.isdirectory(session_dir) == 1 then
@@ -241,6 +241,26 @@ local function get_session_title(filepath)
   end
   file:close()
   return "Untitled"
+end
+
+---Create a new session
+function M._create_new_session()
+  if not M.client or not M.client:is_running() then
+    return
+  end
+  M.client:new_session(function(session)
+    vim.schedule(function()
+      if session then
+        M.active_session_path = nil
+        M.refresh_sessions()
+        if M.panes and M.panes.main and M.panes.main:is_valid() then
+          M.panes.main:set_lines({})
+        end
+      else
+        vim.notify("  ❌ Failed to create new session", vim.log.levels.ERROR)
+      end
+    end)
+  end)
 end
 
 ---Fetch sessions from filesystem and re-render sidebar
@@ -909,29 +929,7 @@ local function create(layout)
         local trimmed = vim.trim(line)
         -- "+ New Chat" entry
         if trimmed == "+ New Chat" then
-          if M.client and M.client:is_running() then
-            M.client:new_session(function(session)
-              vim.schedule(function()
-                if session then
-                  local path = session.path or session.sessionPath or ""
-                  local title = session.title or session.name or "New Chat"
-                  M.active_session_path = path
-                  -- Add to sessions list
-                  if not M.sessions then M.sessions = {} end
-                  -- Mark all as inactive, add new one
-                  for _, s in ipairs(M.sessions) do
-                    s.is_active = false
-                  end
-                  table.insert(M.sessions, 1, { path = path, title = title, is_active = true })
-                  M._render_sidebar()
-                  -- Load messages for the new session
-                  M._load_session_messages(path)
-                else
-                  vim.notify("  ❌ Failed to create new session", vim.log.levels.ERROR)
-                end
-              end)
-            end)
-          end
+          M._create_new_session()
           return
         end
         -- Session entry: find which session was selected
@@ -993,6 +991,10 @@ local function create(layout)
             end
           end
         end)
+      end,
+      -- New chat
+      ["A"] = function()
+        M._create_new_session()
       end,
       -- Refresh session list
       ["r"] = function()
